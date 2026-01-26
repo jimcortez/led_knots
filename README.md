@@ -182,7 +182,7 @@ This ensures the LED strip (which is ribbon-like) always bends in its flexible d
 
 ## License
 
-MIT License
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
 
 ## Contributing
 
