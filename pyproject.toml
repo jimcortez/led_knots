@@ -20,6 +20,7 @@ dependencies = [
     "cadquery>=2.6.1",
     "numpy>=2.4.1",
     "pyknotid",
+    "pyyaml>=6.0",
     "yacv-server>=0.10.11",
 ]
 

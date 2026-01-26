@@ -76,6 +76,32 @@ Options:
   --server           Start the yacv server for web viewing
 ```
 
+## Configuration
+
+LED Knots uses a centralized configuration system via `config.yaml`. This file controls:
+
+- **Output bounds**: Dimensions for the generated models (width, length, height)
+- **Tube settings**: Cross-section parameters (outer diameter, wall thickness, LED tolerances)
+- **LED strip settings**: LED strip specifications (width, height, LED count, twist requirements)
+- **Export settings**: Export tolerances for 3D file formats
+
+### Customizing Configuration
+
+You can override the default `config.yaml` by creating a `config.local.yaml` file in the project root. This allows you to customize settings without modifying the default configuration.
+
+Example `config.local.yaml`:
+```yaml
+output_bounds:
+  width: 150
+  height: 200
+
+tube_settings:
+  outer_diameter: 35
+  wall_thickness: 1.5
+```
+
+All knot modules automatically use these configuration values, making it easy to adjust model dimensions and tube parameters across all knot types.
+
 ## Project Structure
 
 ```
@@ -113,17 +139,7 @@ The LED cross-section consists of:
 
 This design allows the LED strip to be inserted into the center channel while the outer ring provides structural support and diffusion.
 
-## Advanced Features
 
-### Orientation Optimization
-
-The `jog_bend_3d` knot demonstrates advanced orientation control:
-
-- **Curvature analysis**: Samples the path to compute curvature at each point
-- **Twist optimization**: Computes optimal twist angles so the LED strip bends in its flexible axis
-- **Auxiliary spine**: Uses CadQuery's auxiliary spine feature to control cross-section orientation during sweep
-
-This ensures the LED strip (which is ribbon-like) always bends in its flexible direction rather than its rigid direction.
 
 ## License
 

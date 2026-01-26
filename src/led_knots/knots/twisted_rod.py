@@ -6,12 +6,10 @@ cross-section along a path with an auxiliary spine that controls the rotation.
 The end face is rotated 90 degrees around the z-axis from the first face.
 """
 
-import logging
 import math
-import cadquery as cq
-from cadquery.func import *
+from cadquery.func import spline, sweep
 
-from led_knots.core import parse_args, print_part_info, render_part
+from led_knots.core import get_config, render_part
 from led_knots.core import create_led_circle_face
 
 
@@ -50,47 +48,37 @@ def create_helix_points(height, radius, total_rotation_deg, num_points=50):
     return points
 
 
-def main():
-    """Generate and render the twisted rod knot."""
-    logging.basicConfig(level=logging.DEBUG)
+# Load configuration
+config = get_config(
+    name="Twisted Rod Knot",
+    description="Create and render a twisted rod knot (90-degree rotation)"
+)
 
-    args = parse_args(description="Create and render a twisted rod knot (90-degree rotation)")
+# Create the twisted rod
+height = config.output_bounds.height
+total_rotation = 90.0  # Total twist in degrees
+aux_radius = 10.0  # Radius of the auxiliary helix
 
-    # Create the twisted rod
-    height = 100.0  # Height of the pipe (mm)
-    total_rotation = 90.0  # Total twist in degrees
-    aux_radius = 10.0  # Radius of the auxiliary helix
+# Create the main sweep path (straight line along z-axis)
+path = spline([(0, 0, 0), (0, 0, height)], tgts=[(0, 0, 1), (0, 0, 1)])
 
-    tube_radius = 15
-    wall_thickness = 1.0             # Wall thickness (mm)
-    oval_wall_thickness = 2.0
+# Create the auxiliary spine (helix) that controls the twist
+# The helix spirals around the main path, causing the cross-section to rotate
+helix_points = create_helix_points(
+    height=height,
+    radius=aux_radius,
+    total_rotation_deg=total_rotation,
+    num_points=50
+)
+aux_spine = spline(helix_points)
 
-    # Create the main sweep path (straight line along z-axis)
-    path = spline([(0, 0, 0), (0, 0, height)], tgts=[(0, 0, 1), (0, 0, 1)])
+# Create the cross-section face
+faces = create_led_circle_face(
+    **config.tube_settings.to_led_circle_face_kwargs(orient_to_path=path)
+)
 
-    # Create the auxiliary spine (helix) that controls the twist
-    # The helix spirals around the main path, causing the cross-section to rotate
-    helix_points = create_helix_points(
-        height=height,
-        radius=aux_radius,
-        total_rotation_deg=total_rotation,
-        num_points=50
-    )
-    aux_spine = spline(helix_points)
+# Sweep the face along the path with the auxiliary spine controlling rotation
+result = sweep(faces, path, aux=aux_spine)
 
-    # Create the cross-section face
-    faces = create_led_circle_face(
-        tube_radius, 
-        wall_thickness=wall_thickness, 
-        oval_wall_thickness=oval_wall_thickness, 
-        orient_to_path=path)
-
-    # Sweep the face along the path with the auxiliary spine controlling rotation
-    result = sweep(faces, path, aux=aux_spine)
-
-    # Render the rod based on command line arguments
-    render_part(result, "Twisted Rod Knot", args)
-
-
-if __name__ == "__main__":
-    main()
+# Render the part
+render_part(result, config)

@@ -12,6 +12,7 @@ from .utils import (
     parse_args,
     print_part_info,
     render_part,
+    draw_part,
     scale_pyknot_points,
     sample_path_curvature,
     compute_optimal_twist_angles,
@@ -26,11 +27,14 @@ from .led_circle import (
     create_dev_square_face,
 )
 
+from .config import get_config
+
 __all__ = [
     # Utils
     'parse_args',
     'print_part_info',
     'render_part',
+    'draw_part',
     'scale_pyknot_points',
     'sample_path_curvature',
     'compute_optimal_twist_angles',
@@ -41,4 +45,6 @@ __all__ = [
     'create_led_circle_face',
     'create_dev_circle_face',
     'create_dev_square_face',
+    # Config
+    'get_config',
 ]

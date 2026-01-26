@@ -21,8 +21,10 @@ from typing import Callable, Optional, Tuple, Union
 import numpy as np
 
 import cadquery as cq
+from cadquery.func import sweep
+from .led_circle import create_led_circle_face
 
-logging.basicConfig(level=logging.DEBUG)
+# Logging will be configured by parse_args() when --verbose flag is used
 
 
 # ============================================================================
@@ -98,6 +100,7 @@ def parse_args(description: str = "Create and render a knot model"):
         argparse.Namespace: Parsed arguments with:
             - export: Optional filepath to export the model to (STL, STEP format)
             - server: Boolean flag (not used for CadQuery, but kept for compatibility)
+            - verbose: Boolean flag to enable DEBUG level logging
     """
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
@@ -111,7 +114,18 @@ def parse_args(description: str = "Create and render a knot model"):
         action='store_true',
         help='Start the yacv server for web viewing'
     )
-    return parser.parse_args()
+    parser.add_argument(
+        '-v', '--verbose',
+        action='store_true',
+        help='Enable verbose (DEBUG level) logging'
+    )
+    args = parser.parse_args()
+    
+    # Configure logging if verbose flag is set
+    if args.verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    
+    return args
 
 
 # ============================================================================
@@ -160,17 +174,17 @@ def scale_pyknot_points(points: np.ndarray, width: float, height: float, length:
 # DISPLAY AND EXPORT UTILITIES
 # ============================================================================
 
-def render_part(part: Union[cq.Workplane, cq.Solid], name: str, args):
+def render_part(part: Union[cq.Workplane, cq.Solid], config):
     """
-    Render the part based on parsed command line arguments.
+    Render the part based on configuration.
     
     Args:
         part: The Workplane or Solid to render
-        name: Name of the part (used for export/display)
-        args: Parsed command line arguments from parse_args()
+        config: Config object with export, server, and name properties
     """
+    name = config.name or "Knot"
     # Set environment variable before importing yacv_server if we only want export
-    if args.export and not args.server:
+    if config.export.filepath and not config.server:
         os.environ['YACV_DISABLE_SERVER'] = '1'
     
     # Import yacv_server (server will auto-start unless disabled)
@@ -186,29 +200,44 @@ def render_part(part: Union[cq.Workplane, cq.Solid], name: str, args):
         solid = part
     
     # If export is specified, export to the filepath
-    if args.export:
+    if config.export.filepath:
         # Ensure directory exists
-        export_dir = os.path.dirname(args.export)
+        export_dir = os.path.dirname(config.export.filepath)
         if export_dir and not os.path.exists(export_dir):
             os.makedirs(export_dir, exist_ok=True)
         
         # Get file extension to determine export format
-        file_ext = os.path.splitext(args.export)[1].lower()
+        file_ext = os.path.splitext(config.export.filepath)[1].lower()
         
         # Export based on file extension
         if file_ext == '.stl':
-            cq.exporters.export(solid, args.export, tolerance=0.00005, angularTolerance=0.05)
-            print(f"Exported {name} to {args.export} (STL format)")
+            cq.exporters.export(
+                solid, 
+                config.export.filepath, 
+                tolerance=config.export.tolerance, 
+                angularTolerance=config.export.angular_tolerance
+            )
+            print(f"Exported {name} to {config.export.filepath} (STL format)")
             return
         
         if file_ext in ['.step', '.stp']:
-            cq.exporters.export(solid, args.export)
-            print(f"Exported {name} to {args.export} (STEP format)")
+            cq.exporters.export(
+                solid, 
+                config.export.filepath,
+                tolerance=config.export.tolerance,
+                angularTolerance=config.export.angular_tolerance
+            )
+            print(f"Exported {name} to {config.export.filepath} (STEP format)")
             return
         
         if file_ext == '.3mf':
-            cq.exporters.export(solid, args.export)
-            print(f"Exported {name} to {args.export} (3MF format)")
+            cq.exporters.export(
+                solid, 
+                config.export.filepath,
+                tolerance=config.export.tolerance,
+                angularTolerance=config.export.angular_tolerance
+            )
+            print(f"Exported {name} to {config.export.filepath} (3MF format)")
             return
         
         if file_ext in ['.glb', '.gltf']:
@@ -221,9 +250,9 @@ def render_part(part: Union[cq.Workplane, cq.Solid], name: str, args):
                 sys.exit(1)
             
             glb_data, _ = export_data
-            with open(args.export, 'wb') as f:
+            with open(config.export.filepath, 'wb') as f:
                 f.write(glb_data)
-            print(f"Exported {name} to {args.export} (GLB format)")
+            print(f"Exported {name} to {config.export.filepath} (GLB format)")
             return
         
         # Unknown extension: fail fast with a helpful message.
@@ -236,7 +265,7 @@ def render_part(part: Union[cq.Workplane, cq.Solid], name: str, args):
         sys.exit(2)
     
     # If server is specified, start the server and show the part
-    if args.server:
+    if config.server:
         # Server should already be started by import, but ensure it's running
         if yacv.server_thread is None:
             yacv.start()
@@ -254,8 +283,47 @@ def render_part(part: Union[cq.Workplane, cq.Solid], name: str, args):
             yacv.stop()
     
     # If neither export nor server is specified, default to interactive display
-    if not args.export and not args.server:
+    if not config.export.filepath and not config.server:
         show(solid, names=name)
+
+
+def draw_part(path, config, **face_kwargs):
+    """
+    Create and render a part by sweeping an LED circle face along a path.
+    
+    This is a convenience function that combines the common pattern of:
+    1. Creating an LED circle face using config settings
+    2. Sweeping the face along the provided path
+    3. Rendering the resulting part
+    
+    Args:
+        path: CadQuery Wire or Edge representing the sweep path
+        config: Config object with tube_settings, export, server, and name properties
+        **face_kwargs: Additional keyword arguments to pass to create_led_circle_face
+                       (e.g., rotation_z, etc.). Note: orient_to_path is automatically
+                       set to the path parameter and should not be provided.
+    
+    Returns:
+        The swept solid/compound result
+    """
+    
+    
+    # Create the LED circle face with config settings, always orienting to the path
+    # Additional kwargs can override defaults (e.g., rotation_z)
+    face_shape = create_led_circle_face(
+        **config.tube_settings.to_led_circle_face_kwargs(
+            orient_to_path=path,
+            **face_kwargs
+        )
+    )
+    
+    # Sweep the face along the path
+    result = sweep(face_shape, path)
+    
+    # Render the part
+    render_part(result, config)
+    
+    return result
 
 
 def print_part_info(part: cq.Workplane, name: str, parameters: dict):
