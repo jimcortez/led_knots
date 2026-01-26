@@ -1,6 +1,6 @@
 # LED Knots
 
-A Python library for generating 3D printable mathematical knot models designed to house LED strips. Built using the [CadQuery](https://cadquery.readthedocs.io/) CAD engine.
+A Python tool for generating 3D printable mathematical knot models designed to house LED strips. Built using the [CadQuery](https://cadquery.readthedocs.io/) CAD engine.
 
 ## Overview
 
@@ -102,61 +102,6 @@ led_knots/
 ├── pyproject.toml
 └── README.md
 ```
-
-## Using as a Library
-
-You can use LED Knots as a library in your own projects:
-
-```python
-from led_knots.core import create_led_circle_face, render_part, parse_args
-from cadquery.func import spline, sweep
-
-# Create a custom path
-path = spline([(0, 0, 0), (0, 100, 100)], tgts=[(0, 0, 1), (0, 1, 0)])
-
-# Create the LED circle cross-section
-face = create_led_circle_face(
-    outer_radius=15,
-    wall_thickness=1.0,
-    oval_wall_thickness=2.0,
-    orient_to_path=path,
-    rotation_z=90
-)
-
-# Sweep to create the 3D solid
-result = sweep(face, path)
-
-# Export or display
-args = parse_args()
-render_part(result, "Custom Knot", args)
-```
-
-### Core API
-
-#### `create_led_circle_face()`
-
-Creates a 2D LED circle cross-section for sweeping along a path.
-
-Parameters:
-- `outer_radius`: Outer radius of the main ring (mm)
-- `wall_thickness`: Wall thickness of the outer ring (mm)
-- `rect_inner_x`: Inner X dimension of center rectangle (mm)
-- `rect_inner_y`: Inner Y dimension of center rectangle (mm)
-- `oval_wall_thickness`: Wall thickness around the rectangle (mm)
-- `orient_to_path`: Wire to orient the face to
-- `rotation_z`: Rotation angle in degrees
-
-#### `sample_path_curvature()`
-
-Analyzes path curvature for orientation optimization.
-
-#### `compute_optimal_twist_angles()`
-
-Computes twist angles to keep LED strip bends within tolerance.
-
-#### `build_variable_twist_spine()`
-
-Creates an auxiliary spine for controlling sweep orientation.
 
 ## LED Cross-Section Design
 
