@@ -1,0 +1,12 @@
+---
+alwaysApply: true
+---
+
+- Always run Python files to check for syntax and runtime errors before marking a task as complete.
+- For Python files in this project, use `uv` to run them (this project uses uv for dependency management).
+- Examples of how to run:
+  - Basic script: `uv run filename.py`
+  - With environment variables: `CI=1 uv run object.py`
+  - Module execution: `uv run -m module_name`
+- If the script fails with errors, fix them before considering the task complete.
+- Even if the code looks correct, always verify by running it to catch runtime errors, import issues, or other problems that static analysis might miss.

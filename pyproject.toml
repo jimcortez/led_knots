@@ -1,0 +1,57 @@
+[project]
+name = "led-knots"
+version = "0.1.0"
+description = "Mathematical knot models for LED strip housings using CadQuery"
+readme = "README.md"
+requires-python = ">=3.13"
+license = {text = "MIT"}
+keywords = ["cadquery", "3d-printing", "led", "knots", "cad"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Manufacturing",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Multimedia :: Graphics :: 3D Modeling",
+]
+dependencies = [
+    "cadquery>=2.6.1",
+    "numpy>=2.4.1",
+    "pyknotid",
+    "yacv-server>=0.10.11",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+[project.scripts]
+led-knots-rod = "led_knots.knots.rod:main"
+led-knots-ring = "led_knots.knots.ring:main"
+led-knots-helix = "led_knots.knots.helix:main"
+led-knots-sine-wave = "led_knots.knots.sine_wave:main"
+led-knots-trefoil = "led_knots.knots.trefoil:main"
+led-knots-figure-8 = "led_knots.knots.figure_8:main"
+led-knots-jog-bend = "led_knots.knots.jog_bend:main"
+led-knots-jog-bend-3d = "led_knots.knots.jog_bend_3d:main"
+led-knots-quarter-turn = "led_knots.knots.quarter_turn:main"
+led-knots-twisted-rod = "led_knots.knots.twisted_rod:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/led_knots"]
+
+[tool.uv.sources]
+pyknotid = { git = "https://github.com/sashakolpakov/pyknotid.git" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
