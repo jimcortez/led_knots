@@ -15,6 +15,7 @@ LED Knots creates parametric 3D models of various mathematical knots and paths, 
 - **Flexible orientation control**: Advanced path curvature analysis and twist optimization
 - **Multiple export formats**: STL, STEP, 3MF, GLB/GLTF support
 - **Web-based preview**: Optional yacv-server integration for browser-based 3D viewing
+- **GLB cache**: Cached previews by path and config so repeated viewing is fast; optional `--no-cache` and `--only-cache` flags
 
 ## Installation
 
@@ -40,16 +41,18 @@ pip install -e .
 
 ## Quick Start
 
-### Generate a knot model
-
-Each knot type can be run as a standalone script:
+Each knot type can be run as a standalone script. Export to a file, or view in the built-in viewer.
 
 ```bash
-# Using the module directly
+# Export to STL (or .step, .3mf, .glb, .gltf)
 python -m led_knots.knots.trefoil --export trefoil.stl
+# or, if installed: led-knots-trefoil --export trefoil.stl
 
-# Or using installed entry points
-led-knots-trefoil --export trefoil.stl
+# View in the default viewer (uses cache when available)
+python -m led_knots.knots.trefoil
+
+# Start the yacv web server and view in your browser
+python -m led_knots.knots.trefoil --server
 ```
 
 ### Available commands
@@ -69,25 +72,50 @@ led-knots-trefoil --export trefoil.stl
 
 ### Command line options
 
-```bash
-led-knots-trefoil --help
+All knot commands accept the same options:
 
-Options:
-  --export FILEPATH  Export the model to the specified file path
-                     Supported formats: .stl, .step, .stp, .3mf, .glb, .gltf
-  --server           Start the yacv server for web viewing
-```
+| Option | Description |
+|--------|-------------|
+| `--export FILEPATH` | Export the model to a file. Supported formats: `.stl`, `.step`, `.stp`, `.3mf`, `.glb`, `.gltf` |
+| `--server` | Start the yacv web server and open the model in your browser |
+| `-v`, `--verbose` | Enable debug-level logging |
+| `--no-cache` | Always rebuild the 3D model from the path; never use or update the GLB cache |
+| `--only-cache` | Only show the model if a cached GLB exists; skip building if not (useful for quick previews) |
+
+When you omit `--export` and `--server`, the model is shown in the default viewer. Use `--server` to keep a local web server running for browser-based viewing.
 
 ## Configuration
 
-LED Knots uses a centralized configuration system via `config.yaml`. This file controls:
+LED Knots uses a centralized configuration system via `config.yaml` in the project root. This file controls:
 
 - **Output bounds**: Dimensions for the generated models (width, length, height)
 - **Tube settings**: Cross-section parameters (auto-diameter or manual outer diameter, wall thickness, oval wall thickness, connector width, LED tolerances, diffusion ridges)
 - **LED strip settings**: LED strip specifications (width, height, LED count, twist requirements)
+- **Server**: Object cache location and optional yacv-server options (host, port, colors, etc.)
 - **Export settings**: Export tolerances for 3D file formats
 
-### New Configuration Features
+### Server and cache
+
+The **server** section in `config.yaml` configures where GLB previews are cached and how the yacv web viewer behaves:
+
+```yaml
+server:
+  object_cache: 'cache/glb_blobs'   # Folder for cached GLB files (created automatically)
+  # Optional overrides for yacv-server (uncomment to use):
+  # host: 'localhost'
+  # port: 32323
+  # color_faces: '#ffbf00'
+  # color_edges: '#1a1aff'
+  # color_vertices: '#1a1a1a'
+  # disable_server: false
+```
+
+- **object_cache**: Directory (relative to the project root) where built GLB models are stored. When you view a knot without `--export`, a hash of the path and settings is used as the filename; if that file exists, it is loaded instead of rebuilding. This speeds up repeated previews. The folder is created on first run if it does not exist.
+- **yacv overrides**: Any option you set here (e.g. `host`, `port`, `color_faces`) is applied as the corresponding `YACV_*` environment variable before the viewer starts, so you can customize the server without editing shell env by hand.
+
+Cache is **not** used when you pass `--export`: the model is always built from the path and then exported. Use `--no-cache` to force a full rebuild even when only viewing, and `--only-cache` to only open a previously cached GLB (no build).
+
+### Configuration details
 
 #### Auto-Diameter Calculation
 
