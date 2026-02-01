@@ -18,7 +18,7 @@ import logging
 from cadquery.func import *
 
 from led_knots.core import (
-    parse_args,
+    get_config,
     render_part,
     sample_path_curvature,
     compute_optimal_twist_angles,
@@ -26,10 +26,13 @@ from led_knots.core import (
 )
 from led_knots.core import create_led_circle_face
 
+logger = logging.getLogger(__name__)
+
 
 def main():
     """Generate and render the jog bend 3D knot."""
     logging.basicConfig(level=logging.DEBUG)
+    config = get_config(name="Jog Bend 3D Knot", description="Create and render a jog bend 3D knot")
 
     # Geometry parameters
     tube_radius = 15
@@ -54,8 +57,6 @@ def main():
     max_twist_rate = 2.0              # Maximum twist rate (degrees per mm)
     smoothing_window = 7              # Window size for Gaussian smoothing
 
-    args = parse_args(description="Create and render a jog bend 3D knot")
-
     # Create the sweep path
     path = spline(
         [
@@ -71,17 +72,20 @@ def main():
     )
 
     # Analyze path curvature
-    logging.info("Analyzing path curvature...")
+    logger.info("Analyzing path curvature...")
     curvature_data = sample_path_curvature(path, num_samples=num_samples)
 
     # Log curvature info
     max_curvature = max(s['curvature'] for s in curvature_data)
     avg_curvature = sum(s['curvature'] for s in curvature_data) / len(curvature_data)
-    logging.info(f"Path curvature: max={max_curvature:.6f} (1/mm), avg={avg_curvature:.6f} (1/mm)")
-    logging.info(f"Equivalent min radius: {1/max_curvature if max_curvature > 0 else float('inf'):.1f} mm")
+    logger.info("Path curvature: max=%.6f (1/mm), avg=%.6f (1/mm)", max_curvature, avg_curvature)
+    logger.info(
+        "Equivalent min radius: %.1f mm",
+        1 / max_curvature if max_curvature > 0 else float('inf')
+    )
 
     # Compute optimal twist angles to keep bends within tolerance
-    logging.info("Computing optimal twist angles...")
+    logger.info("Computing optimal twist angles...")
     twist_angles = compute_optimal_twist_angles(
         curvature_data,
         initial_rotation=initial_rotation,
@@ -95,10 +99,10 @@ def main():
     min_twist = min(twist_angles)
     max_twist = max(twist_angles)
     twist_range = max_twist - min_twist
-    logging.info(f"Twist angles: min={min_twist:.1f}°, max={max_twist:.1f}°, range={twist_range:.1f}°")
+    logger.info("Twist angles: min=%.1f°, max=%.1f°, range=%.1f°", min_twist, max_twist, twist_range)
 
     # Build auxiliary spine to control face orientation during sweep
-    logging.info("Building auxiliary spine for orientation control...")
+    logger.info("Building auxiliary spine for orientation control...")
     aux_spine = build_variable_twist_spine(
         path,
         twist_angles,
@@ -116,11 +120,11 @@ def main():
     )
 
     # Sweep the face along the path with auxiliary spine controlling orientation
-    logging.info("Sweeping face along path with orientation control...")
+    logger.info("Sweeping face along path with orientation control...")
     result = sweep(faces, path, aux=aux_spine)
 
-    # Render the jog bend knot based on command line arguments
-    render_part(result, "Jog Bend 3D Knot", args)
+    # Render the jog bend knot based on config (export, server, cache, etc.)
+    render_part(result, config)
 
 
 if __name__ == "__main__":

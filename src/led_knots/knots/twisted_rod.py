@@ -6,11 +6,14 @@ cross-section along a path with an auxiliary spine that controls the rotation.
 The end face is rotated 90 degrees around the z-axis from the first face.
 """
 
+import logging
 import math
 from cadquery.func import spline, sweep
 
 from led_knots.core import get_config, render_part
 from led_knots.core import create_led_circle_face
+
+logger = logging.getLogger(__name__)
 
 
 def create_helix_points(height, radius, total_rotation_deg, num_points=50):

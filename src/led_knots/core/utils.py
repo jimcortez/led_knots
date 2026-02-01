@@ -17,12 +17,17 @@ import logging
 import math
 import os
 import sys
-from typing import Callable, Optional, Tuple, Union
+import time
+from pathlib import Path
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 import numpy as np
 
 import cadquery as cq
-from cadquery.func import sweep
+from cadquery.func import sweep, spline
+from .cache_utils import cache_key_for_part
 from .led_circle import create_led_circle_face
+
+logger = logging.getLogger(__name__)
 
 # Logging will be configured by parse_args() when --verbose flag is used
 
@@ -119,6 +124,16 @@ def parse_args(description: str = "Create and render a knot model"):
         action='store_true',
         help='Enable verbose (DEBUG level) logging'
     )
+    parser.add_argument(
+        '--no-cache',
+        action='store_true',
+        help='Never use cache; always sweep and render'
+    )
+    parser.add_argument(
+        '--only-cache',
+        action='store_true',
+        help='Only render if a cached GLB exists; do not sweep on cache miss'
+    )
     args = parser.parse_args()
     
     # Configure logging if verbose flag is set
@@ -174,155 +189,220 @@ def scale_pyknot_points(points: np.ndarray, width: float, height: float, length:
 # DISPLAY AND EXPORT UTILITIES
 # ============================================================================
 
-def render_part(part: Union[cq.Workplane, cq.Solid], config):
+def render_part(
+    part: Union[cq.Workplane, cq.Solid, cq.Compound, bytes],
+    config,
+    cache_path: Optional[Union[str, Path]] = None,
+):
     """
     Render the part based on configuration.
-    
+
     Args:
-        part: The Workplane or Solid to render
-        config: Config object with export, server, and name properties
+        part: The Workplane, Solid, Compound, or GLB bytes (from cache) to render.
+        config: Config object with export, server, name, no_cache, etc.
+        cache_path: Optional path to write GLB bytes after building (when part is solid
+                    and not config.no_cache). Ignored when part is bytes.
     """
     name = config.name or "Knot"
+    is_glb_bytes = isinstance(part, bytes)
     # Set environment variable before importing yacv_server if we only want export
     if config.export.filepath and not config.server:
         os.environ['YACV_DISABLE_SERVER'] = '1'
-    
+
     # Import yacv_server (server will auto-start unless disabled)
     from yacv_server import yacv, show
-    
-    # Get the solid from the workplane (or use directly if already a solid/compound)
+
+    if is_glb_bytes:
+        glb_bytes = part
+        # Pre-built GLB from cache: show and/or write to export path
+        if config.export.filepath:
+            file_ext = os.path.splitext(config.export.filepath)[1].lower()
+            if file_ext in ['.glb', '.gltf']:
+                export_dir = os.path.dirname(config.export.filepath)
+                if export_dir and not os.path.exists(export_dir):
+                    os.makedirs(export_dir, exist_ok=True)
+                with open(config.export.filepath, 'wb') as f:
+                    f.write(glb_bytes)
+                logger.info("Exported %s to %s (GLB format)", name, config.export.filepath)
+                return
+            # Other formats not supported when part is from cache
+            logger.error("Export format %s not supported when using cached GLB", file_ext)
+            sys.exit(2)
+        show(glb_bytes, names=name)
+        if config.server:
+            if yacv.server_thread is None:
+                yacv.start()
+            logger.info("Server started. View %s in the web interface.", name)
+            if yacv.server is not None:
+                logger.info("Server URL: http://%s:%s", yacv.server.server_name, yacv.server.server_port)
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("Shutting down server...")
+                yacv.stop()
+        return
+
+    # Part is a solid/workplane
     if isinstance(part, (cq.Solid, cq.Compound)):
         solid = part
     elif hasattr(part, 'val'):
         solid = part.val()
     else:
-        # Assume it's already a shape we can use
         solid = part
-    
+
     # If export is specified, export to the filepath
     if config.export.filepath:
-        # Ensure directory exists
         export_dir = os.path.dirname(config.export.filepath)
         if export_dir and not os.path.exists(export_dir):
             os.makedirs(export_dir, exist_ok=True)
-        
-        # Get file extension to determine export format
         file_ext = os.path.splitext(config.export.filepath)[1].lower()
-        
-        # Export based on file extension
+
         if file_ext == '.stl':
             cq.exporters.export(
-                solid, 
-                config.export.filepath, 
-                tolerance=config.export.tolerance, 
+                solid,
+                config.export.filepath,
+                tolerance=config.export.tolerance,
                 angularTolerance=config.export.angular_tolerance
             )
-            print(f"Exported {name} to {config.export.filepath} (STL format)")
+            logger.info("Exported %s to %s (STL format)", name, config.export.filepath)
             return
-        
         if file_ext in ['.step', '.stp']:
             cq.exporters.export(
-                solid, 
+                solid,
                 config.export.filepath,
                 tolerance=config.export.tolerance,
                 angularTolerance=config.export.angular_tolerance
             )
-            print(f"Exported {name} to {config.export.filepath} (STEP format)")
+            logger.info("Exported %s to %s (STEP format)", name, config.export.filepath)
             return
-        
         if file_ext == '.3mf':
             cq.exporters.export(
-                solid, 
+                solid,
                 config.export.filepath,
                 tolerance=config.export.tolerance,
                 angularTolerance=config.export.angular_tolerance
             )
-            print(f"Exported {name} to {config.export.filepath} (3MF format)")
+            logger.info("Exported %s to %s (3MF format)", name, config.export.filepath)
             return
-        
         if file_ext in ['.glb', '.gltf']:
-            # Use yacv_server for GLB/GLTF export. This requires tessellation and may
-            # fail on invalid solids, so keep it opt-in by extension.
             show(solid, names=name)
             export_data = yacv.export(name)
             if export_data is None:
-                print(f"Error: Could not export {name}", file=sys.stderr)
+                logger.error("Could not export %s", name)
                 sys.exit(1)
-            
             glb_data, _ = export_data
             with open(config.export.filepath, 'wb') as f:
                 f.write(glb_data)
-            print(f"Exported {name} to {config.export.filepath} (GLB format)")
+            logger.info("Exported %s to %s (GLB format)", name, config.export.filepath)
+            if cache_path is not None and not getattr(config, 'no_cache', False):
+                cache_path = Path(cache_path) if not isinstance(cache_path, Path) else cache_path
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(cache_path, 'wb') as f:
+                    f.write(glb_data)
+                logger.debug("Wrote cache %s", cache_path)
             return
-        
-        # Unknown extension: fail fast with a helpful message.
-        print(
-            f"Error: Unknown export file extension '{file_ext}'. "
-            f"Supported formats: .stl, .step, .stp, .3mf, .glb, .gltf. "
-            f"Did you mean '.3mf'?",
-            file=sys.stderr,
+
+        logger.error(
+            "Unknown export file extension '%s'. Supported: .stl, .step, .stp, .3mf, .glb, .gltf.",
+            file_ext
         )
         sys.exit(2)
-    
-    # If server is specified, start the server and show the part
+
+    # Display path (no export): show solid, optionally write GLB to cache
+    show(solid, names=name)
+    if cache_path is not None and not getattr(config, 'no_cache', False):
+        export_data = yacv.export(name)
+        if export_data is not None:
+            glb_data, _ = export_data
+            cache_path = Path(cache_path) if not isinstance(cache_path, Path) else cache_path
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(cache_path, 'wb') as f:
+                f.write(glb_data)
+            logger.debug("Wrote cache %s", cache_path)
+
     if config.server:
-        # Server should already be started by import, but ensure it's running
         if yacv.server_thread is None:
             yacv.start()
-        show(solid, names=name)
-        print(f"Server started. View {name} in the web interface.")
+        logger.info("Server started. View %s in the web interface.", name)
         if yacv.server is not None:
-            print(f"Server URL: http://{yacv.server.server_name}:{yacv.server.server_port}")
-        # Keep the script running so the server stays alive
+            logger.info("Server URL: http://%s:%s", yacv.server.server_name, yacv.server.server_port)
         try:
-            import time
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
-            print("\nShutting down server...")
+            logger.info("Shutting down server...")
             yacv.stop()
-    
-    # If neither export nor server is specified, default to interactive display
-    if not config.export.filepath and not config.server:
-        show(solid, names=name)
 
 
 def draw_part(path, config, aux=None, **face_kwargs):
     """
     Create and render a part by sweeping an LED circle face along a path.
-    
-    This is a convenience function that combines the common pattern of:
-    1. Creating an LED circle face using config settings
-    2. Sweeping the face along the provided path
-    3. Rendering the resulting part
-    
+
+    When --export is set, always sweeps and renders (and writes to cache unless --no-cache).
+    Otherwise, uses cache when available (unless --no-cache); on cache hit skips the sweep.
+    With --only-cache, only renders if a cached GLB exists; does not sweep on cache miss.
+
     Args:
         path: CadQuery Wire or Edge representing the sweep path
-        config: Config object with tube_settings, export, server, and name properties
+        config: Config object with tube_settings, export, server, name, no_cache, only_cache
+        aux: Optional auxiliary path for sweep orientation
         **face_kwargs: Additional keyword arguments to pass to create_led_circle_face
-                       (e.g., rotation_z, etc.). Note: orient_to_path is automatically
-                       set to the path parameter and should not be provided.
-    
+                       (e.g., rotation_z). orient_to_path is set automatically.
+
     Returns:
-        The swept solid/compound result
+        The swept solid/compound result, or None when rendering from cache or on only-cache miss.
     """
-    
-    
-    # Create the LED circle face with config settings, always orienting to the path
-    # Additional kwargs can override defaults (e.g., rotation_z)
+    cache_dir = getattr(config.server_settings, 'cache_dir', None)
+    cache_stem = cache_key_for_part(
+        config.name, path, aux=aux, face_kwargs=face_kwargs, config=config
+    )
+    cache_path = None
+    if cache_dir is not None:
+        cache_path = Path(cache_dir) / f"{cache_stem}.glb"
+
+    # When --export is set: always sweep, render, and (unless --no-cache) write to cache
+    if config.export.filepath:
+        logger.debug("Export requested; sweeping and rendering (cache write if not --no-cache)")
+        face_shape = create_led_circle_face(
+            **config.tube_settings.to_led_circle_face_kwargs(
+                orient_to_path=path,
+                **face_kwargs
+            )
+        )
+        result = sweep(face_shape, path, aux=aux)
+        render_part(result, config, cache_path=cache_path)
+        return result
+
+    # --only-cache: only render if cached GLB exists
+    if getattr(config, 'only_cache', False):
+        if cache_path is None or not cache_path.exists():
+            logger.info("Object not in cache (--only-cache); skipping sweep.")
+            return None
+        with open(cache_path, 'rb') as f:
+            glb_bytes = f.read()
+        logger.info("Rendering from cache: %s", cache_path)
+        render_part(glb_bytes, config)
+        return None
+
+    # Cache hit: use cached GLB instead of sweeping
+    if cache_path is not None and cache_path.exists() and not getattr(config, 'no_cache', False):
+        with open(cache_path, 'rb') as f:
+            glb_bytes = f.read()
+        logger.info("Cache hit; rendering from cache: %s", cache_path)
+        render_part(glb_bytes, config)
+        return None
+
+    # Cache miss: sweep and render, then write to cache if not --no-cache
+    logger.debug("Cache miss; sweeping and rendering.")
     face_shape = create_led_circle_face(
         **config.tube_settings.to_led_circle_face_kwargs(
             orient_to_path=path,
             **face_kwargs
         )
     )
-    
-    # Sweep the face along the path
     result = sweep(face_shape, path, aux=aux)
-    
-    # Render the part
-    render_part(result, config)
-    
+    render_part(result, config, cache_path=cache_path)
     return result
 
 
@@ -646,8 +726,6 @@ def build_variable_twist_spine(
     Returns:
         A CadQuery Edge object representing the auxiliary spine (spline)
     """
-    from cadquery.func import spline
-    
     n = len(twist_angles)
     if n < 2:
         raise ValueError("Need at least 2 twist angles to build auxiliary spine")

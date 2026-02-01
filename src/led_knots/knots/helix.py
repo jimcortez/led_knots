@@ -5,9 +5,12 @@ Creates a helix knot by sweeping an LED circle cross-section
 along a helical path. The path construction is the focus here;
 """
 
+import logging
 import math
 from cadquery import Wire
 from led_knots.core import draw_part, get_config
+
+logger = logging.getLogger(__name__)
 
 # Load configuration
 config = get_config(

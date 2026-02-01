@@ -1,7 +1,7 @@
 output_bounds: 
-  width: 100 #mm
-  length: 100 #mm
-  height: 100 #mm
+  width: 200 #mm
+  length: 200 #mm
+  height: 200 #mm
 
 tube_settings:
   #outer_diameter: 30 #mm
@@ -23,6 +23,20 @@ led_strip_settings:
   height: 1.8 #mm
   led_count: 60 #number of leds per meter
   min_90_degtree_twist distance: 90 #mm minimum distance for 90 degree twist
+
+server:
+  object_cache: 'cache/glb_blobs'
+  # Optional yacv_server env overrides (snake_case → YACV_* env vars)
+  # protocol: 'http'  # or 'stderr'
+  # texture: 'file:/path/to/image.png'
+  # color_faces: '#ffbf00'
+  # color_edges: '#1a1aff'
+  # color_vertices: '#1a1a1a'
+  # graceful_secs_connect: 12.0
+  # graceful_secs_work: 1000000
+  # host: 'localhost'
+  # port: 32323
+  # disable_server: false
 
 export:
   tolerance: 0.00005 # Tolerance for export (STL, STEP, 3MF)

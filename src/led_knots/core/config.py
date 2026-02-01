@@ -5,11 +5,14 @@ Reads configuration from config.yaml and optionally overrides with config.local.
 Provides an object-oriented interface to configuration values.
 """
 
+import logging
 import os
 import yaml
 from pathlib import Path
 from typing import Any, Dict, Optional
 from .utils import parse_args
+
+logger = logging.getLogger(__name__)
 
 
 class OutputBounds:
@@ -154,6 +157,47 @@ class TubeSettings:
         return base_kwargs
 
 
+class ServerSettings:
+    """Server and yacv-related configuration. Optional keys map to YACV_* env vars."""
+
+    # Attribute name -> YACV env var name
+    _ENV_MAP = {
+        'protocol': 'YACV_PROTOCOL',
+        'texture': 'YACV_TEXTURE',
+        'color_faces': 'YACV_COLOR_FACES',
+        'color_edges': 'YACV_COLOR_EDGES',
+        'color_vertices': 'YACV_COLOR_VERTICES',
+        'graceful_secs_connect': 'YACV_GRACEFUL_SECS_CONNECT',
+        'graceful_secs_work': 'YACV_GRACEFUL_SECS_WORK',
+        'host': 'YACV_HOST',
+        'port': 'YACV_PORT',
+        'disable_server': 'YACV_DISABLE_SERVER',
+    }
+
+    def __init__(self, data: Dict[str, Any], project_root: Path):
+        self.object_cache = str(data.get('object_cache', 'cache/glb_blobs'))
+        self.cache_dir = project_root / self.object_cache
+        # Optional yacv env overrides (snake_case in YAML)
+        self.protocol = data.get('protocol')
+        self.texture = data.get('texture')
+        self.color_faces = data.get('color_faces')
+        self.color_edges = data.get('color_edges')
+        self.color_vertices = data.get('color_vertices')
+        self.graceful_secs_connect = data.get('graceful_secs_connect')
+        self.graceful_secs_work = data.get('graceful_secs_work')
+        self.host = data.get('host')
+        self.port = data.get('port')
+        _disable = data.get('disable_server')
+        self.disable_server = str(_disable).lower() in ('true', '1', 'yes') if _disable is not None else None
+
+    def apply_to_env(self) -> None:
+        """Set YACV_* environment variables for any non-None attributes."""
+        for attr, env_name in self._ENV_MAP.items():
+            val = getattr(self, attr, None)
+            if val is not None:
+                os.environ[env_name] = str(val)
+
+
 class ExportSettings:
     """Export settings configuration."""
     
@@ -197,11 +241,19 @@ class Config:
         # Parse command line arguments
         args = parse_args(description=description or "Create and render a knot model")
         
+        # Server settings (cache dir, optional yacv env)
+        server_data = config_data.get('server', {})
+        self.server_settings = ServerSettings(server_data, project_root)
+        self.server_settings.cache_dir.mkdir(parents=True, exist_ok=True)
+        logger.debug("Cache directory: %s", self.server_settings.cache_dir)
+        
         # Initialize export settings with command line filepath
         self.export = ExportSettings(config_data.get('export', {}), filepath=args.export)
         
         # Store other command line arguments as properties
         self.server = args.server
+        self.no_cache = args.no_cache
+        self.only_cache = args.only_cache
         self.name = name  # Name of the part (used for export/display)
     
     @staticmethod
@@ -220,7 +272,11 @@ class Config:
 _config_instance: Config = None
 
 
-def get_config(description: Optional[str] = None, name: Optional[str] = None) -> Config:
+def get_config(
+    description: Optional[str] = None,
+    name: Optional[str] = None,
+    set_env_vars: bool = True,
+) -> Config:
     """
     Get the global configuration instance.
     
@@ -228,6 +284,8 @@ def get_config(description: Optional[str] = None, name: Optional[str] = None) ->
         description: Optional description for the argument parser. 
                      If provided, will be used when parsing command line arguments.
         name: Optional name of the part (used for export/display).
+        set_env_vars: If True (default), set YACV_* environment variables from
+                      server config so yacv_server sees them when later imported.
     
     Returns:
         Config: The global configuration instance with parsed command line arguments.
@@ -235,4 +293,6 @@ def get_config(description: Optional[str] = None, name: Optional[str] = None) ->
     global _config_instance
     if _config_instance is None:
         _config_instance = Config(description=description, name=name)
+    if set_env_vars:
+        _config_instance.server_settings.apply_to_env()
     return _config_instance
