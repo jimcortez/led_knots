@@ -167,3 +167,30 @@ def cache_path_for_part(
         config=config,
     )
     return Path(cache_dir) / f"{stem}.glb"
+
+
+def preview_stl_path_for_part(
+    config: Any,
+    path,
+    aux=None,
+    face_kwargs: Optional[Dict[str, Any]] = None,
+) -> Optional[Path]:
+    """
+    Derive the preview STL file path for a part from config and path/aux/face_kwargs.
+
+    Returns preview_cache_dir / f"{stem}.stl" using the same stem as cache_key_for_part.
+    Used when --preview is set and the STL source is the preview cache (not --export .stl).
+    """
+    preview_cache_dir = getattr(
+        getattr(config, "preview_settings", None), "preview_cache_dir", None
+    )
+    if preview_cache_dir is None:
+        return None
+    stem = cache_key_for_part(
+        config.name,
+        path,
+        aux=aux,
+        face_kwargs=face_kwargs,
+        config=config,
+    )
+    return Path(preview_cache_dir) / f"{stem}.stl"

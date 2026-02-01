@@ -46,3 +46,12 @@ server:
 export:
   tolerance: 0.00005 # Tolerance for export (STL, STEP, 3MF)
   angular_tolerance: 0.05 # Angular tolerance for export (radians) (STL, STEP, 3MF)
+
+preview:
+  stl_cache: 'cache/preview'
+  image_width: 800  # pixels
+  image_height: 600  # pixels
+  dpi: 100
+  elevation: 30  # 3D view elevation (degrees)
+  azimuth: 45   # 3D view azimuth (degrees)
+  roll: 0       # 3D view roll (degrees)

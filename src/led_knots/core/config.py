@@ -213,6 +213,20 @@ class ExportSettings:
         self.angular_tolerance = float(data.get('angular_tolerance', 0.05))
 
 
+class PreviewSettings:
+    """Preview image settings (STL to image via numpy-stl + matplotlib)."""
+
+    def __init__(self, data: Dict[str, Any], project_root: Path):
+        stl_cache = str(data.get('stl_cache', 'cache/preview'))
+        self.preview_cache_dir = project_root / stl_cache
+        self.image_width = int(data.get('image_width', 800))
+        self.image_height = int(data.get('image_height', 600))
+        self.dpi = int(data.get('dpi', 100))
+        self.elevation = float(data.get('elevation', 30))
+        self.azimuth = float(data.get('azimuth', 45))
+        self.roll = float(data.get('roll', 0))
+
+
 class Config:
     """Main configuration object."""
     
@@ -255,11 +269,18 @@ class Config:
         
         # Initialize export settings with command line filepath
         self.export = ExportSettings(config_data.get('export', {}), filepath=args.export)
+
+        # Preview settings (STL cache dir, image size, view angles)
+        preview_data = config_data.get('preview', {})
+        self.preview_settings = PreviewSettings(preview_data, project_root)
+        self.preview_settings.preview_cache_dir.mkdir(parents=True, exist_ok=True)
+        logger.debug("Preview cache directory: %s", self.preview_settings.preview_cache_dir)
         
         # Store other command line arguments as properties
         self.server = args.server
         self.no_cache = args.no_cache
         self.only_cache = args.only_cache
+        self.preview_filepath = args.preview
         self.name = name  # Name of the part (used for export/display)
     
     @staticmethod

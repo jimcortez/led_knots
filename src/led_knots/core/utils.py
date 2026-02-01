@@ -24,8 +24,9 @@ import numpy as np
 
 import cadquery as cq
 from cadquery.func import sweep
-from .cache_utils import cache_key_for_part, cache_path_for_part
+from .cache_utils import cache_key_for_part, cache_path_for_part, preview_stl_path_for_part
 from .led_circle import create_led_circle_face
+from .preview import render_stl_to_image
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,12 @@ def parse_args(description: str = "Create and render a knot model"):
         '--only-cache',
         action='store_true',
         help='Only render if a cached GLB exists; do not sweep on cache miss'
+    )
+    parser.add_argument(
+        '--preview',
+        type=str,
+        metavar='FILEPATH',
+        help='Generate a preview image for the model and save to the specified file path'
     )
     args = parser.parse_args()
     
@@ -135,6 +142,8 @@ def render_part(
     path=None,
     aux=None,
     face_kwargs: Optional[dict] = None,
+    preview_stl_path: Optional[Path] = None,
+    preview_image_path: Optional[Union[str, Path]] = None,
 ):
     """
     Render the part based on configuration.
@@ -217,6 +226,12 @@ def render_part(
                 angularTolerance=config.export.angular_tolerance
             )
             logger.info("Exported %s to %s (STL format)", name, config.export.filepath)
+            if preview_image_path:
+                render_stl_to_image(
+                    Path(config.export.filepath),
+                    Path(preview_image_path),
+                    config.preview_settings,
+                )
             return
         if file_ext in ['.step', '.stp']:
             cq.exporters.export(
@@ -226,6 +241,18 @@ def render_part(
                 angularTolerance=config.export.angular_tolerance
             )
             logger.info("Exported %s to %s (STEP format)", name, config.export.filepath)
+            if preview_image_path and preview_stl_path is not None:
+                cq.exporters.export(
+                    solid,
+                    str(preview_stl_path),
+                    tolerance=config.export.tolerance,
+                    angularTolerance=config.export.angular_tolerance,
+                )
+                render_stl_to_image(
+                    preview_stl_path,
+                    Path(preview_image_path),
+                    config.preview_settings,
+                )
             return
         if file_ext == '.3mf':
             cq.exporters.export(
@@ -235,6 +262,18 @@ def render_part(
                 angularTolerance=config.export.angular_tolerance
             )
             logger.info("Exported %s to %s (3MF format)", name, config.export.filepath)
+            if preview_image_path and preview_stl_path is not None:
+                cq.exporters.export(
+                    solid,
+                    str(preview_stl_path),
+                    tolerance=config.export.tolerance,
+                    angularTolerance=config.export.angular_tolerance,
+                )
+                render_stl_to_image(
+                    preview_stl_path,
+                    Path(preview_image_path),
+                    config.preview_settings,
+                )
             return
         if file_ext in ['.glb', '.gltf']:
             show(solid, names=name)
@@ -252,6 +291,18 @@ def render_part(
                 with open(cache_path, 'wb') as f:
                     f.write(glb_data)
                 logger.debug("Wrote cache %s", cache_path)
+            if preview_image_path and preview_stl_path is not None:
+                cq.exporters.export(
+                    solid,
+                    str(preview_stl_path),
+                    tolerance=config.export.tolerance,
+                    angularTolerance=config.export.angular_tolerance,
+                )
+                render_stl_to_image(
+                    preview_stl_path,
+                    Path(preview_image_path),
+                    config.preview_settings,
+                )
             return
 
         logger.error(
@@ -293,6 +344,8 @@ def draw_part(path, config, aux=None, **face_kwargs):
     When --export is set, always sweeps and renders (and writes to cache unless --no-cache).
     Otherwise, uses cache when available (unless --no-cache); on cache hit skips the sweep.
     With --only-cache, only renders if a cached GLB exists; does not sweep on cache miss.
+    When --preview is set, always builds (sweeps) to produce STL for the preview image.
+    Sweep is called at most once per invocation.
 
     Args:
         path: CadQuery Wire or Edge representing the sweep path
@@ -305,22 +358,11 @@ def draw_part(path, config, aux=None, **face_kwargs):
         The swept solid/compound result, or None when rendering from cache or on only-cache miss.
     """
     cache_path = cache_path_for_part(config, path, aux=aux, face_kwargs=face_kwargs)
+    preview_filepath = getattr(config, 'preview_filepath', None)
+    face_kwargs_dict = face_kwargs or {}
 
-    # When --export is set: always sweep, render, and (unless --no-cache) write to cache
-    if config.export.filepath:
-        logger.debug("Export requested; sweeping and rendering (cache write if not --no-cache)")
-        face_shape = create_led_circle_face(
-            **config.tube_settings.to_led_circle_face_kwargs(
-                orient_to_path=path,
-                **face_kwargs
-            )
-        )
-        result = sweep(face_shape, path, aux=aux)
-        render_part(result, config, cache_path=cache_path)
-        return result
-
-    # --only-cache: only render if cached GLB exists
-    if getattr(config, 'only_cache', False):
+    # --only-cache (and no preview): only render if cached GLB exists; do not sweep
+    if getattr(config, 'only_cache', False) and not preview_filepath:
         if cache_path is None or not cache_path.exists():
             logger.info("Object not in cache (--only-cache); skipping sweep.")
             return None
@@ -330,22 +372,71 @@ def draw_part(path, config, aux=None, **face_kwargs):
         render_part(glb_bytes, config)
         return None
 
-    # Cache hit: use cached GLB instead of sweeping
-    if cache_path is not None and cache_path.exists() and not getattr(config, 'no_cache', False):
+    # No export, no preview: use cached GLB if available to avoid sweep
+    if (
+        not config.export.filepath
+        and not preview_filepath
+        and cache_path is not None
+        and cache_path.exists()
+        and not getattr(config, 'no_cache', False)
+    ):
         with open(cache_path, 'rb') as f:
             glb_bytes = f.read()
         logger.info("Cache hit; rendering from cache: %s", cache_path)
         render_part(glb_bytes, config)
         return None
 
-    # Cache miss: sweep and render, then write to cache if not --no-cache
-    logger.debug("Cache miss; sweeping and rendering.")
+    # We need the solid: sweep once (export, preview, or cache miss)
+    logger.debug("Sweeping and rendering.")
     face_shape = create_led_circle_face(
         **config.tube_settings.to_led_circle_face_kwargs(
             orient_to_path=path,
-            **face_kwargs
+            **face_kwargs_dict
         )
     )
     result = sweep(face_shape, path, aux=aux)
+
+    # Preview-only (no export): write STL to preview cache, render image, exit without viewer
+    if preview_filepath and not config.export.filepath:
+        os.environ['YACV_DISABLE_SERVER'] = '1'
+        solid = result.val() if hasattr(result, 'val') else result
+        preview_stl_path = preview_stl_path_for_part(
+            config, path, aux=aux, face_kwargs=face_kwargs_dict
+        )
+        if preview_stl_path is not None:
+            preview_stl_path.parent.mkdir(parents=True, exist_ok=True)
+            cq.exporters.export(
+                solid,
+                str(preview_stl_path),
+                tolerance=config.export.tolerance,
+                angularTolerance=config.export.angular_tolerance,
+            )
+            render_stl_to_image(
+                preview_stl_path,
+                Path(preview_filepath),
+                config.preview_settings,
+            )
+        return result
+
+    # Export (with optional preview): render_part exports and optionally generates preview image
+    if config.export.filepath:
+        preview_stl_path = None
+        if preview_filepath:
+            if os.path.splitext(config.export.filepath)[1].lower() == '.stl':
+                preview_stl_path = Path(config.export.filepath)
+            else:
+                preview_stl_path = preview_stl_path_for_part(
+                    config, path, aux=aux, face_kwargs=face_kwargs_dict
+                )
+        render_part(
+            result,
+            config,
+            cache_path=cache_path,
+            preview_stl_path=preview_stl_path,
+            preview_image_path=preview_filepath,
+        )
+        return result
+
+    # No export: show and optionally write GLB to cache
     render_part(result, config, cache_path=cache_path)
     return result
