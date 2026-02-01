@@ -1,7 +1,12 @@
 output_bounds: 
-  width: 200 #mm
-  length: 200 #mm
-  height: 200 #mm
+  width: 1000 #mm
+  length: 1000 #mm
+  height: 1000 #mm
+
+  #saturn 4 Ultra 16k
+  # width: 200
+  # length: 108
+  # height: 210
 
 tube_settings:
   #outer_diameter: 30 #mm
@@ -22,7 +27,7 @@ led_strip_settings:
   width: 10 #mm
   height: 1.8 #mm
   led_count: 60 #number of leds per meter
-  min_90_degtree_twist distance: 90 #mm minimum distance for 90 degree twist
+  min_90_degtree_twist_distance: 70 #mm minimum distance for 90 degree twist
 
 server:
   object_cache: 'cache/glb_blobs'

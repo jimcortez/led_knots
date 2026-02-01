@@ -22,7 +22,6 @@ __version__ = "0.1.0"
 from .core import (
     # Utilities
     parse_args,
-    print_part_info,
     render_part,
     scale_pyknot_points,
     sample_path_curvature,
@@ -39,7 +38,6 @@ __all__ = [
     '__version__',
     # Utilities
     'parse_args',
-    'print_part_info',
     'render_part',
     'scale_pyknot_points',
     'sample_path_curvature',

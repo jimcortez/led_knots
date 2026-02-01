@@ -717,7 +717,6 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "cadquery" },
-    { name = "matplotlib" },
     { name = "numpy" },
     { name = "pyknotid" },
     { name = "pyyaml" },
@@ -726,6 +725,7 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "matplotlib" },
     { name = "pytest" },
     { name = "pytest-cov" },
 ]
@@ -733,7 +733,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cadquery", specifier = ">=2.6.1" },
-    { name = "matplotlib", specifier = ">=3.10.8" },
+    { name = "matplotlib", marker = "extra == 'dev'", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=2.4.1" },
     { name = "pyknotid", git = "https://github.com/sashakolpakov/pyknotid.git" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },

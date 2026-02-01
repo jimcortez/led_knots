@@ -31,7 +31,13 @@ class LedStripSettings:
         self.width = float(data.get('width', 10.0))
         self.height = float(data.get('height', 1.8))
         self.led_count = int(data.get('led_count', 300))
-        # Note: min_90_degtree_twist distance is not yet implemented
+        # Support typo key min_90_degtree_twist_distance and correct min_90_degree_twist_distance
+        twist_dist = data.get('min_90_degree_twist_distance') or data.get('min_90_degtree_twist_distance', 90.0)
+        self.min_90_degree_twist_distance = float(twist_dist)
+        if self.min_90_degree_twist_distance <= 0:
+            raise ValueError(
+                "min_90_degree_twist_distance must be positive (got %s)" % self.min_90_degree_twist_distance
+            )
 
 
 class TubeSettings:

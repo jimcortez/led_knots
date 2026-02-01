@@ -7,6 +7,7 @@ rotation/face kwargs, and config (output_bounds, tube_settings, led_strip_settin
 
 import hashlib
 import re
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 # Decimal places for path coordinates before hashing (avoids cache misses from float variants)
@@ -109,6 +110,7 @@ def config_settings_hash(config) -> str:
         'width': _round_for_hash(ls.width),
         'height': _round_for_hash(ls.height),
         'led_count': ls.led_count,
+        'min_90_degree_twist_distance': _round_for_hash(ls.min_90_degree_twist_distance),
     }
     blob = str(sorted(out.items()))
     return hashlib.sha256(blob.encode()).hexdigest()[:_PATH_HASH_DIGEST_LEN]
@@ -137,3 +139,31 @@ def cache_key_for_part(
         parts.append(config_hash)
     parts.append(ph)
     return "-".join(p for p in parts if p)
+
+
+def cache_path_for_part(
+    config: Any,
+    path,
+    aux=None,
+    face_kwargs: Optional[Dict[str, Any]] = None,
+) -> Optional[Path]:
+    """
+    Derive the cache file path for a part from config and path/aux/face_kwargs.
+
+    Returns cache_dir / f"{cache_key_for_part(...)}.glb" when config has a
+    cache_dir, otherwise None. Use this so callers do not need to compute
+    cache_path manually before calling render_part().
+    """
+    cache_dir = getattr(
+        getattr(config, "server_settings", None), "cache_dir", None
+    )
+    if cache_dir is None:
+        return None
+    stem = cache_key_for_part(
+        config.name,
+        path,
+        aux=aux,
+        face_kwargs=face_kwargs,
+        config=config,
+    )
+    return Path(cache_dir) / f"{stem}.glb"
