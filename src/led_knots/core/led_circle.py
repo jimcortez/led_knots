@@ -5,7 +5,9 @@ This module provides a function to create a 2D LED circle cross-section
 that can be swept along a path to create 3D geometry.
 """
 
+import math
 import cadquery as cq
+from cadquery import Vector, Wire
 from cadquery.func import *
 
 
@@ -228,6 +230,7 @@ def create_led_circle_face(
     connector_width: float = 1.0,
     orient_to_path: Wire = None,
     rotation_z: float = 90.0,
+    diffusion_ridges: dict = None,
 ):
     """
     Create a 2D LED circle cross-section using the CadQuery functional API.
@@ -254,6 +257,9 @@ def create_led_circle_face(
         orient_to_path: If provided (Wire object), orient the result to the path's start point and tangent.
                         The result will be positioned at the path's start point with the normal aligned to the path's tangent.
         rotation_z: Rotation angle in degrees around Z axis (around profile center). Default: 90.0
+        diffusion_ridges: Optional dict with keys 'ridge_height', 'ridge_width', 'ridge_spacing' in mm.
+                         If None or False, no ridges are added. If provided, ridges are added as triangles
+                         on the outside of the oval following its curvature.
         
     Returns:
         Face or Compound representing the complete 2D cross-section ready for sweeping
@@ -270,41 +276,113 @@ def create_led_circle_face(
     rect_inner_half_x = rect_inner_x / 2
     rect_inner_half_y = rect_inner_y / 2
     
-    # Calculate oval dimensions based on rectangle + oval_wall_thickness
-    # Oval must be at least min_oval_wall_thickness away from rectangle at all points
-    oval_x = rect_inner_x + 2 * oval_wall_thickness
-    oval_y = rect_inner_y + 2 * oval_wall_thickness
+    # Calculate oval dimensions to ensure rectangle corners are at least oval_wall_thickness
+    # away from the ellipse edge. For an ellipse, we need to ensure the offset rectangle
+    # (rectangle expanded by oval_wall_thickness in all directions) fits inside the ellipse
+    # with its corners on the ellipse.
+    # 
+    # The offset rectangle has dimensions:
+    offset_rect_x = rect_inner_x + 2 * oval_wall_thickness
+    offset_rect_y = rect_inner_y + 2 * oval_wall_thickness
+    offset_rect_half_x = offset_rect_x / 2
+    offset_rect_half_y = offset_rect_y / 2
+    
+    # For an ellipse with semi-axes a and b, a point (x, y) is on the ellipse if:
+    # (x/a)² + (y/b)² = 1
+    # 
+    # We want the offset rectangle corners to be on the ellipse, so:
+    # (offset_rect_half_x / a)² + (offset_rect_half_y / b)² = 1
+    # 
+    # We'll start with an initial aspect ratio based on the offset rectangle dimensions,
+    # then calculate the minimum ellipse that contains the offset rectangle corners.
+    # 
+    # Initial aspect ratio (can be adjusted, but using offset rectangle ratio as starting point)
+    initial_aspect_ratio = offset_rect_y / offset_rect_x if offset_rect_x > 0 else 1.0
+    
+    # Calculate minimum ellipse semi-axes such that offset rectangle corners are on the ellipse
+    # With b = a * aspect_ratio:
+    # (offset_rect_half_x / a)² + (offset_rect_half_y / (a * aspect_ratio))² = 1
+    # (offset_rect_half_x² + offset_rect_half_y² / aspect_ratio²) / a² = 1
+    # a² = offset_rect_half_x² + offset_rect_half_y² / aspect_ratio²
+    # a = sqrt(offset_rect_half_x² + offset_rect_half_y² / aspect_ratio²)
+    aspect_ratio = initial_aspect_ratio
+    oval_semi_x = (offset_rect_half_x**2 + (offset_rect_half_y / aspect_ratio)**2)**0.5
+    oval_semi_y = oval_semi_x * aspect_ratio
+    
+    # Convert to full dimensions
+    oval_x = oval_semi_x * 2
+    oval_y = oval_semi_y * 2
+    
+    # Verify that this ellipse ensures the original rectangle corners are at least
+    # oval_wall_thickness away. The offset rectangle corners should be on the ellipse.
+    # Check: (offset_rect_half_x / oval_semi_x)² + (offset_rect_half_y / oval_semi_y)² should be ≈ 1.0
+    corner_check = (offset_rect_half_x / oval_semi_x)**2 + (offset_rect_half_y / oval_semi_y)**2
+    if abs(corner_check - 1.0) > 0.001:
+        # Recalculate with corrected aspect ratio
+        # We want: (offset_rect_half_x / a)² + (offset_rect_half_y / b)² = 1
+        # With b = a * aspect_ratio, solve for a:
+        oval_semi_x = (offset_rect_half_x**2 + (offset_rect_half_y / aspect_ratio)**2)**0.5
+        oval_semi_y = oval_semi_x * aspect_ratio
+        oval_x = oval_semi_x * 2
+        oval_y = oval_semi_y * 2
+    
+    # Recalculate semi-axes after initial calculation
+    oval_semi_x = oval_x / 2
+    oval_semi_y = oval_y / 2
     
     # Scale oval if it's too large to fit within inner ring
     # The oval should fit within the inner radius
     # For an ellipse centered at origin, we compare half-dimensions to the radius
     max_oval_half_size = inner_radius * 0.95  # Leave some margin
-    max_half_dimension = max(oval_x / 2, oval_y / 2)
+    max_half_dimension = max(oval_semi_x, oval_semi_y)
     
     if max_half_dimension > max_oval_half_size:
         # Scale down the oval to fit within inner ring
         scale_factor = max_oval_half_size / max_half_dimension
         oval_x = oval_x * scale_factor
         oval_y = oval_y * scale_factor
+        oval_semi_x = oval_x / 2
+        oval_semi_y = oval_y / 2
         
-        # Verify scaled oval still maintains minimum wall thickness
-        actual_wall_x = (oval_x - rect_inner_x) / 2
-        actual_wall_y = (oval_y - rect_inner_y) / 2
+        # Verify scaled oval still maintains minimum wall thickness at corners
+        # Check if the offset rectangle (expanded by min_oval_wall_thickness) still fits
+        # The offset rectangle corners should be inside or on the scaled ellipse
+        min_offset_rect_half_x = rect_inner_half_x + min_oval_wall_thickness
+        min_offset_rect_half_y = rect_inner_half_y + min_oval_wall_thickness
+        corner_check_after_scale = (min_offset_rect_half_x / oval_semi_x)**2 + (min_offset_rect_half_y / oval_semi_y)**2
         
-        # If scaling violated minimum wall thickness, we need to find a compromise
-        # Try to use minimum wall thickness, but ensure it still fits in the ring
-        if actual_wall_x < min_oval_wall_thickness or actual_wall_y < min_oval_wall_thickness:
-            # Calculate what the oval size would be with minimum wall thickness
-            min_oval_x = rect_inner_x + 2 * min_oval_wall_thickness
-            min_oval_y = rect_inner_y + 2 * min_oval_wall_thickness
-            min_oval_max_half = max(min_oval_x / 2, min_oval_y / 2)
+        # If corners are outside the ellipse (check > 1.0), wall thickness is violated
+        if corner_check_after_scale > 1.0:
+            # Need to recalculate ellipse to ensure minimum wall thickness
+            # Calculate minimum ellipse that fits within inner ring and maintains wall thickness
+            min_offset_rect_x = rect_inner_x + 2 * min_oval_wall_thickness
+            min_offset_rect_y = rect_inner_y + 2 * min_oval_wall_thickness
+            min_offset_rect_half_x = min_offset_rect_x / 2
+            min_offset_rect_half_y = min_offset_rect_y / 2
             
-            # CRITICAL: Check against actual inner_radius, not max_oval_half_size
-            # If minimum wall thickness oval fits within actual inner radius, use it
+            # Calculate ellipse with same aspect ratio that fits the offset rectangle
+            # and fits within inner_radius
+            min_aspect_ratio = min_offset_rect_y / min_offset_rect_x if min_offset_rect_x > 0 else 1.0
+            min_oval_semi_x = (min_offset_rect_half_x**2 + (min_offset_rect_half_y / min_aspect_ratio)**2)**0.5
+            min_oval_semi_y = min_oval_semi_x * min_aspect_ratio
+            min_oval_max_half = max(min_oval_semi_x, min_oval_semi_y)
+            
+            # If this minimum ellipse fits within inner radius, use it
             if min_oval_max_half <= inner_radius:
-                oval_x = min_oval_x
-                oval_y = min_oval_y
-            # else: keep the scaled version (which fits but may violate minimum)
+                oval_semi_x = min_oval_semi_x
+                oval_semi_y = min_oval_semi_y
+                oval_x = oval_semi_x * 2
+                oval_y = oval_semi_y * 2
+            else:
+                # Even minimum wall thickness doesn't fit - scale it down but warn
+                final_scale = inner_radius / min_oval_max_half
+                oval_semi_x = min_oval_semi_x * final_scale
+                oval_semi_y = min_oval_semi_y * final_scale
+                oval_x = oval_semi_x * 2
+                oval_y = oval_semi_y * 2
+                print(f"  ⚠️  WARNING: Cannot maintain minimum wall thickness! Scaled to fit inner ring.")
+                print(f"     - Requested wall thickness: {min_oval_wall_thickness:.3f} mm")
+                print(f"     - Actual wall thickness at corners may be less")
     
     # Final verification: ensure oval fits within inner ring (CRITICAL CHECK)
     # ALWAYS check against actual inner_radius to be absolutely sure it fits
@@ -353,38 +431,19 @@ def create_led_circle_face(
     connector_top_length = connector_top_y - connector_bottom_y
     connector_top_center_y = (connector_top_y + connector_bottom_y) / 2
     
-    # CRITICAL: For an ellipse, we must ensure the rectangle corners fit inside the ellipse
-    # An ellipse with semi-axes a, b contains point (x, y) if (x/a)² + (y/b)² ≤ 1
-    # Rectangle corners are at (±rect_inner_x/2, ±rect_inner_y/2)
-    # We need: (rect_inner_x/2 / (oval_x/2))² + (rect_inner_y/2 / (oval_y/2))² ≤ 1
-    # Which simplifies to: (rect_inner_x/oval_x)² + (rect_inner_y/oval_y)² ≤ 1
+    # Final verification: ensure rectangle corners fit in ellipse (should always be true by construction)
+    # This is a safety check - the ellipse was calculated to ensure the offset rectangle
+    # (expanded by wall thickness) fits, so the original rectangle should definitely fit
     oval_semi_x = oval_x / 2
     oval_semi_y = oval_y / 2
     rect_half_x = rect_inner_x / 2
     rect_half_y = rect_inner_y / 2
     
-    # Check if rectangle corners fit in ellipse
     corner_fit_check = (rect_half_x / oval_semi_x)**2 + (rect_half_y / oval_semi_y)**2
-    rectangle_fits_in_ellipse = corner_fit_check <= 1.0
-    
-    if not rectangle_fits_in_ellipse:
-        # Rectangle doesn't fit - need to scale oval to ensure rectangle fits
-        # We need: (rect_half_x / new_oval_semi_x)² + (rect_half_y / new_oval_semi_y)² = 1
-        # With aspect ratio preserved: new_oval_semi_y = new_oval_semi_x * (oval_semi_y / oval_semi_x)
-        # Solving: (rect_half_x / new_oval_semi_x)² + (rect_half_y / (new_oval_semi_x * ratio))² = 1
-        aspect_ratio = oval_semi_y / oval_semi_x
-        # We want the corner to be exactly on the ellipse, so:
-        # (rect_half_x / new_oval_semi_x)² + (rect_half_y / (new_oval_semi_x * aspect_ratio))² = 1
-        # Factor out 1/new_oval_semi_x²: (1/new_oval_semi_x²) * (rect_half_x² + rect_half_y²/aspect_ratio²) = 1
-        # new_oval_semi_x² = rect_half_x² + rect_half_y²/aspect_ratio²
-        new_oval_semi_x = (rect_half_x**2 + (rect_half_y / aspect_ratio)**2)**0.5
-        new_oval_semi_y = new_oval_semi_x * aspect_ratio
-        oval_x = new_oval_semi_x * 2
-        oval_y = new_oval_semi_y * 2
-        # Recalculate semi-axes after scaling
-        oval_semi_x = oval_x / 2
-        oval_semi_y = oval_y / 2
-        print(f"  WARNING: Rectangle corners didn't fit in ellipse! Scaled oval to {oval_x:.3f} x {oval_y:.3f} mm")
+    if corner_fit_check > 1.0 + 0.001:  # Small tolerance for floating point
+        print(f"  ⚠️  WARNING: Rectangle corners extend beyond ellipse! This should not happen.")
+        print(f"     - Corner check value: {corner_fit_check:.6f} (should be ≤ 1.0)")
+        print(f"     - This indicates a calculation error in ellipse sizing")
     
     if oval_semi_x <= 0 or oval_semi_y <= 0:
         raise ValueError(f"Invalid ellipse parameters: oval_semi_x={oval_semi_x:.6f}, oval_semi_y={oval_semi_y:.6f}. "
@@ -427,8 +486,152 @@ def create_led_circle_face(
     bottom_connector_base = plane(connector_width, connector_top_length).moved(x=0.5, y=-connector_top_center_y)
     bottom_connector = rotate_around_center(bottom_connector_base)
     
+    # Generate diffusion ridges if configured
+    ridge_faces = []
+    if diffusion_ridges is not None:
+        ridge_height = diffusion_ridges.get('ridge_height', 0.5)
+        ridge_width = diffusion_ridges.get('ridge_width', 1.0)
+        ridge_spacing = diffusion_ridges.get('ridge_spacing', 0.0)
+        
+        if ridge_height > 0 and ridge_width > 0:
+            # Calculate ellipse perimeter (approximate using Ramanujan's formula)
+            # For ellipse with semi-axes a and b: perimeter ≈ π * sqrt(2 * (a² + b²))
+            # More accurate: π * (3(a + b) - sqrt((3a + b)(a + 3b)))
+            a = oval_semi_x
+            b = oval_semi_y
+            # Using Ramanujan's second approximation for better accuracy
+            h = ((a - b) / (a + b)) ** 2 if (a + b) > 0 else 0
+            ellipse_perimeter = math.pi * (a + b) * (1 + (3 * h) / (10 + math.sqrt(4 - 3 * h)))
+            
+            # Helper function to calculate arc length element for ellipse
+            # For ellipse parameterized as (a*cos(t), b*sin(t)):
+            # ds/dt = sqrt((dx/dt)² + (dy/dt)²) = sqrt(a²sin²(t) + b²cos²(t))
+            def arc_length_element(t):
+                sin_t = math.sin(t)
+                cos_t = math.cos(t)
+                return math.sqrt((a * sin_t)**2 + (b * cos_t)**2)
+            
+            # Helper function to find the parameter t2 such that arc length from t1 to t2 equals target_length
+            # Uses numerical integration with adaptive step size and binary search refinement
+            def find_arc_length_endpoint(t1, target_length, tolerance=1e-6):
+                # Initial estimate using arc length element at t1
+                ds1 = arc_length_element(t1)
+                if ds1 <= 0:
+                    return t1 + 0.01  # Fallback
+                
+                # Initial guess: assume constant ds/dt (first order approximation)
+                t2_guess = t1 + target_length / ds1
+                
+                # Refine using binary search
+                t_low = t1
+                t_high = t1 + 2 * target_length / ds1  # Upper bound
+                
+                # Numerical integration to find exact t2
+                for _ in range(20):  # Max iterations
+                    t_mid = (t_low + t_high) / 2.0
+                    
+                    # Calculate arc length from t1 to t_mid using Simpson's rule
+                    # Use 10 subintervals for accuracy
+                    n_segments = 10
+                    dt = (t_mid - t1) / n_segments
+                    arc_length = 0.0
+                    
+                    for j in range(n_segments):
+                        t_start = t1 + j * dt
+                        t_end = t_start + dt
+                        ds_start = arc_length_element(t_start)
+                        ds_mid = arc_length_element((t_start + t_end) / 2.0)
+                        ds_end = arc_length_element(t_end)
+                        # Simpson's rule: (f(a) + 4f((a+b)/2) + f(b)) * (b-a) / 6
+                        segment_length = (ds_start + 4 * ds_mid + ds_end) * dt / 6.0
+                        arc_length += segment_length
+                    
+                    if abs(arc_length - target_length) < tolerance:
+                        return t_mid
+                    elif arc_length < target_length:
+                        t_low = t_mid
+                    else:
+                        t_high = t_mid
+                
+                return (t_low + t_high) / 2.0
+            
+            # Calculate number of ridges based on actual circumference
+            # Use the actual ellipse perimeter (circumference)
+            ridge_pitch = ridge_width + ridge_spacing
+            if ridge_pitch > 0:
+                num_ridges = max(1, int(ellipse_perimeter / ridge_pitch))
+            else:
+                num_ridges = max(1, int(ellipse_perimeter / ridge_width))
+            
+            # Generate ridges around the ellipse
+            # The ellipse is centered at (0.5, 0) with semi-axes oval_semi_x and oval_semi_y
+            oval_center_x = 0.5
+            oval_center_y = 0.0
+            
+            # Position ridges sequentially to ensure proper spacing
+            # Start at t = 0, and for each ridge, calculate where its base ends
+            # The next ridge starts where the previous one ended (plus spacing)
+            current_t = 0.0
+            
+            for i in range(num_ridges):
+                # Calculate base points: t1 is current position, t2 is where ridge_width arc length ends
+                t1 = current_t
+                t2 = find_arc_length_endpoint(t1, ridge_width)
+                
+                # Center of ridge base (for calculating normal and top point)
+                t_center = (t1 + t2) / 2.0
+                
+                # Calculate point on ellipse at center of ridge base
+                point_x = oval_center_x + a * math.cos(t_center)
+                point_y = oval_center_y + b * math.sin(t_center)
+                
+                # Calculate normal vector at center (pointing outward)
+                nx = math.cos(t_center) / a if a > 0 else 0
+                ny = math.sin(t_center) / b if b > 0 else 0
+                norm_length = math.sqrt(nx * nx + ny * ny)
+                if norm_length > 0:
+                    nx /= norm_length
+                    ny /= norm_length
+                
+                # Calculate base points on ellipse
+                base_p1_x = oval_center_x + a * math.cos(t1)
+                base_p1_y = oval_center_y + b * math.sin(t1)
+                base_p2_x = oval_center_x + a * math.cos(t2)
+                base_p2_y = oval_center_y + b * math.sin(t2)
+                
+                # Calculate top point (extending outward by ridge_height along normal)
+                top_x = point_x + ridge_height * nx
+                top_y = point_y + ridge_height * ny
+                
+                # Move to next ridge position: end of current base + spacing
+                if i < num_ridges - 1:  # Don't calculate spacing after last ridge
+                    if ridge_spacing > 0:
+                        current_t = find_arc_length_endpoint(t2, ridge_spacing)
+                    else:
+                        current_t = t2
+                
+                # Create triangle from the three points
+                # Points: base_p1, base_p2, top (in order to form a triangle)
+                triangle_points = [
+                    (base_p1_x, base_p1_y),
+                    (base_p2_x, base_p2_y),
+                    (top_x, top_y),
+                ]
+                
+                # Create triangle face
+                # Create wire from points using Wire.makePolygon (closed polygon)
+                # Convert points to Vector objects and close the polygon
+                triangle_vectors = [Vector(p[0], p[1], 0) for p in triangle_points]
+                # Close the polygon by adding the first point at the end
+                triangle_vectors_closed = triangle_vectors + [triangle_vectors[0]]
+                triangle_wire = Wire.makePolygon(triangle_vectors_closed)
+                triangle_face = face(triangle_wire)
+                triangle_face_rotated = rotate_around_center(triangle_face)
+                ridge_faces.append(triangle_face_rotated)
+    
     # Combine all faces using fuse
-    result = clean(fuse(outer_ring, center_oval, top_connector, bottom_connector))
+    faces_to_fuse = [outer_ring, center_oval, top_connector, bottom_connector] + ridge_faces
+    result = clean(fuse(*faces_to_fuse))
     
     # If orient_to_path is provided, orient the result to the path
     if orient_to_path is not None:

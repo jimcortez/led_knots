@@ -4,19 +4,24 @@ output_bounds:
   height: 100 #mm
 
 tube_settings:
-  outer_diameter: 30 #mm
+  #outer_diameter: 30 #mm
+  auto_diameter: true #if true, use the led strip led count to calculate best diffusion distance
   wall_thickness: 1.0 #mm
-  oval_wall_thickness: 2.0 #mm
-  connector_width: 1.0 #mm
+  oval_wall_thickness: 0.5 #mm
+  connector_width: 0.5 #mm
   double_sided_led: true
   led_tolerance_width: 1.0 #mm extra space for led to fit in
   led_tolerance_height: 1.0 #mm extra space for led to fit in
+  diffusion_ridges:
+    ridge_height: 2.5 #mm
+    ridge_width: 2.0 #mm
+    ridge_spacing: 1 #mm
 
 led_strip_settings:
   #BTF ws2815
   width: 10 #mm
   height: 1.8 #mm
-  led_count: 300 #number of leds per meter
+  led_count: 60 #number of leds per meter
   min_90_degtree_twist distance: 90 #mm minimum distance for 90 degree twist
 
 export:

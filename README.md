@@ -10,6 +10,8 @@ LED Knots creates parametric 3D models of various mathematical knots and paths, 
 
 - **Multiple knot types**: From simple rods and rings to complex trefoil and torus knots
 - **LED-optimized cross-sections**: Custom cross-section profiles designed for LED strip insertion
+- **Auto-diameter calculation**: Automatically calculates optimal tube diameter based on LED count for best light diffusion
+- **Diffusion ridges**: Optional triangular ridges on the oval surface for enhanced light diffusion and visual effects
 - **Flexible orientation control**: Advanced path curvature analysis and twist optimization
 - **Multiple export formats**: STL, STEP, 3MF, GLB/GLTF support
 - **Web-based preview**: Optional yacv-server integration for browser-based 3D viewing
@@ -81,9 +83,42 @@ Options:
 LED Knots uses a centralized configuration system via `config.yaml`. This file controls:
 
 - **Output bounds**: Dimensions for the generated models (width, length, height)
-- **Tube settings**: Cross-section parameters (outer diameter, wall thickness, LED tolerances)
+- **Tube settings**: Cross-section parameters (auto-diameter or manual outer diameter, wall thickness, oval wall thickness, connector width, LED tolerances, diffusion ridges)
 - **LED strip settings**: LED strip specifications (width, height, LED count, twist requirements)
 - **Export settings**: Export tolerances for 3D file formats
+
+### New Configuration Features
+
+#### Auto-Diameter Calculation
+
+When `auto_diameter: true` is set in `tube_settings`, the outer diameter is automatically calculated based on the LED count to optimize light diffusion. The calculation ensures the distance between LEDs matches the inner radius of the tube, providing optimal spacing for uniform light distribution.
+
+```yaml
+tube_settings:
+  auto_diameter: true  # Automatically calculate diameter from LED count
+  # outer_diameter: 30  # Only needed if auto_diameter is false
+```
+
+#### Diffusion Ridges
+
+Optional triangular ridges can be added to the outside of the oval cross-section to enhance light diffusion and create visual effects. Configure ridges in `tube_settings`:
+
+```yaml
+tube_settings:
+  diffusion_ridges:
+    ridge_height: 2.5  # Height of ridges in mm
+    ridge_width: 2.0   # Width of each ridge base in mm
+    ridge_spacing: 1   # Spacing between ridges in mm
+```
+
+Set `diffusion_ridges: false` or omit the section to disable ridges.
+
+#### Enhanced LED Strip Integration
+
+The configuration system now automatically calculates inner rectangle dimensions from LED strip settings, accounting for:
+- LED strip width and height
+- Tolerance values for fit
+- Double-sided LED support (automatically doubles height when enabled)
 
 ### Customizing Configuration
 
@@ -102,33 +137,6 @@ tube_settings:
 
 All knot modules automatically use these configuration values, making it easy to adjust model dimensions and tube parameters across all knot types.
 
-## Project Structure
-
-```
-led_knots/
-├── src/
-│   └── led_knots/
-│       ├── __init__.py          # Package exports
-│       ├── core/                 # Core utilities
-│       │   ├── __init__.py
-│       │   ├── utils.py         # CLI, rendering, path analysis
-│       │   └── led_circle.py    # LED cross-section creation
-│       └── knots/               # Knot generators
-│           ├── __init__.py
-│           ├── rod.py           # Straight rod
-│           ├── ring.py          # Circular ring
-│           ├── helix.py         # Helical path
-│           ├── sine_wave.py     # Sine wave path
-│           ├── trefoil.py       # Trefoil knot
-│           ├── figure_8.py      # Figure-8/torus knot
-│           ├── jog_bend.py      # 2D jog bend
-│           ├── jog_bend_3d.py   # 3D jog bend with twist
-│           ├── quarter_turn.py  # 90-degree turn
-│           └── twisted_rod.py   # Twisted straight rod
-├── pyproject.toml
-└── README.md
-```
-
 ## LED Cross-Section Design
 
 The LED cross-section consists of:
@@ -136,8 +144,9 @@ The LED cross-section consists of:
 1. **Outer ring**: The main structural housing
 2. **Center oval**: An elliptical cavity with a rectangular inner cutout for the LED strip
 3. **Connecting bars**: Links between the outer ring and center oval
+4. **Diffusion ridges** (optional): Triangular ridges on the outside of the oval for enhanced light diffusion
 
-This design allows the LED strip to be inserted into the center channel while the outer ring provides structural support and diffusion.
+This design allows the LED strip to be inserted into the center channel while the outer ring provides structural support and diffusion. The optional diffusion ridges create additional surface area and light-scattering effects for improved visual appearance.
 
 
 

@@ -287,7 +287,7 @@ def render_part(part: Union[cq.Workplane, cq.Solid], config):
         show(solid, names=name)
 
 
-def draw_part(path, config, **face_kwargs):
+def draw_part(path, config, aux=None, **face_kwargs):
     """
     Create and render a part by sweeping an LED circle face along a path.
     
@@ -318,7 +318,7 @@ def draw_part(path, config, **face_kwargs):
     )
     
     # Sweep the face along the path
-    result = sweep(face_shape, path)
+    result = sweep(face_shape, path, aux=aux)
     
     # Render the part
     render_part(result, config)
