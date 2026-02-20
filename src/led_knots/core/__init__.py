@@ -23,8 +23,8 @@ from .path_utils import (
 
 from .led_circle import (
     create_led_circle_face,
-    create_dev_circle_face,
-    create_dev_square_face,
+    create_solid_circle_face,
+    create_square_face,
 )
 
 from .config import get_config
@@ -42,8 +42,8 @@ __all__ = [
     'build_ribbon_aux_spine',
     # LED Circle
     'create_led_circle_face',
-    'create_dev_circle_face',
-    'create_dev_square_face',
+    'create_solid_circle_face',
+    'create_square_face',
     # Config
     'get_config',
     # Cache

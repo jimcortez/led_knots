@@ -1,57 +1,57 @@
-output_bounds: 
-  width: 1000 #mm
-  length: 1000 #mm
-  height: 1000 #mm
-
-  #saturn 4 Ultra 16k
-  # width: 200
-  # length: 108
-  # height: 210
+# Bounding box for knot path scaling (mm)
+output_bounds:
+  width: 200
+  length: 108
+  height: 100
 
 tube_settings:
-  #outer_diameter: 30 #mm
-  auto_diameter: true #if true, use the led strip led count to calculate best diffusion distance
-  wall_thickness: 1.0 #mm
-  oval_wall_thickness: 0.5 #mm
-  connector_width: 0.5 #mm
+  # Cross-section face type: led_circle (default), solid_circle, or square
+  face_type: led_circle
+  # Outer diameter of the tube in mm
+  outer_diameter: 30
+  # Wall thickness of the outer ring in mm
+  wall_thickness: 1.0
+  # Wall thickness around the oval cavity in mm (led_circle face only)
+  oval_wall_thickness: 0.5
+  # Width of connectors between inner ring and center oval in mm (led_circle face only)
+  connector_width: 0.5
+  # If true, double the LED cavity height to fit strips on both sides
   double_sided_led: true
-  led_tolerance_width: 1.0 #mm extra space for led to fit in
-  led_tolerance_height: 1.0 #mm extra space for led to fit in
+  # Extra width tolerance for LED strip fit in mm
+  led_tolerance_width: 1.0
+  # Extra height tolerance for LED strip fit in mm
+  led_tolerance_height: 1.0
+  # Diffusion ridges on the oval surface; set to false to disable
   diffusion_ridges:
-    ridge_height: 2.5 #mm
-    ridge_width: 2.0 #mm
-    ridge_spacing: 1 #mm
+    ridge_height: 2.5  # mm
+    ridge_width: 2.0  # mm
+    ridge_spacing: 1  # mm
 
+# Physical dimensions of the LED strip
 led_strip_settings:
-  #BTF ws2815
-  width: 10 #mm
-  height: 1.8 #mm
-  led_count: 60 #number of leds per meter
-  min_90_degtree_twist_distance: 70 #mm minimum distance for 90 degree twist
+  width: 10  # mm
+  height: 1.8  # mm
+  led_count: 60  # LEDs per meter
+  min_90_degtree_twist_distance: 70  # mm minimum distance for 90° twist
 
 server:
-  object_cache: 'cache/glb_blobs'
-  # Optional yacv_server env overrides (snake_case → YACV_* env vars)
-  # protocol: 'http'  # or 'stderr'
-  # texture: 'file:/path/to/image.png'
-  # color_faces: '#ffbf00'
-  # color_edges: '#1a1aff'
-  # color_vertices: '#1a1a1a'
-  # graceful_secs_connect: 12.0
-  # graceful_secs_work: 1000000
-  # host: 'localhost'
-  # port: 32323
-  # disable_server: false
+  # Directory for cached GLB objects
+  object_cache: cache/glb_blobs
 
 export:
-  tolerance: 0.00005 # Tolerance for export (STL, STEP, 3MF)
-  angular_tolerance: 0.05 # Angular tolerance for export (radians) (STL, STEP, 3MF)
+  tolerance: 0.0005  # Export tolerance (STL, STEP, 3MF)
+  angular_tolerance: 0.05  # Angular tolerance in radians
+  stl_ascii: true  # true = ASCII (GitHub renders), false = binary (smaller)
 
 preview:
-  stl_cache: 'cache/preview'
-  image_width: 800  # pixels
-  image_height: 600  # pixels
+  stl_cache: cache/preview  # Directory for preview STL cache
+  image_width: 800  # Preview image width in pixels
+  image_height: 600  # Preview image height in pixels
   dpi: 100
-  elevation: 30  # 3D view elevation (degrees)
-  azimuth: 45   # 3D view azimuth (degrees)
-  roll: 0       # 3D view roll (degrees)
+  elevation: 30  # 3D view elevation in degrees
+  azimuth: 45  # 3D view azimuth in degrees
+  roll: 0  # 3D view roll in degrees
+  light_azimuth: 225  # Light direction azimuth for shading
+  light_elevation: 45  # Light direction elevation for shading
+  color: '#b3b3b3'  # Model color (hex or name)
+  opacity: 1.0  # Model opacity (0.0 = transparent, 1.0 = opaque)

@@ -659,7 +659,7 @@ def create_led_circle_face(
     return result
 
 
-def create_dev_circle_face(
+def create_solid_circle_face(
     outer_radius: float,
     wall_thickness: float,
     rect_inner_x: float = 4.0,
@@ -671,7 +671,7 @@ def create_dev_circle_face(
     rotation_z: float = 90.0,
 ):
     """
-    Create a simple filled circle face for development/testing purposes.
+    Create a simple filled circle face.
     
     This is a simplified version of create_led_circle_face that returns
     just a simple filled circle with no complex geometry or validation.
@@ -715,7 +715,7 @@ def create_dev_circle_face(
     return result
 
 
-def create_dev_square_face(
+def create_square_face(
     outer_radius: float,
     wall_thickness: float,
     rect_inner_x: float = 4.0,
@@ -727,7 +727,7 @@ def create_dev_square_face(
     rotation_z: float = 90.0,
 ):
     """
-    Create a simple filled square face for development/testing purposes.
+    Create a simple filled square face.
     
     This is a simplified version of create_led_circle_face that returns
     just a simple filled square with no complex geometry or validation.

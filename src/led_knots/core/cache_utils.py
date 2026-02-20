@@ -89,6 +89,7 @@ def config_settings_hash(config) -> str:
     ts = config.tube_settings
     outer = ts.outer_diameter
     out['tube_settings'] = {
+        'face_type': ts.face_type,
         'outer_diameter': _round_for_hash(outer) if outer is not None else None,
         'wall_thickness': _round_for_hash(ts.wall_thickness),
         'oval_wall_thickness': _round_for_hash(ts.oval_wall_thickness),

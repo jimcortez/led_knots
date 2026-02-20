@@ -44,6 +44,11 @@ class TubeSettings:
     """Tube settings configuration."""
     
     def __init__(self, data: Dict[str, Any]):
+        self.face_type = str(data.get('face_type', 'led_circle'))
+        if self.face_type not in ('led_circle', 'solid_circle', 'square'):
+            raise ValueError(
+                f"face_type must be 'led_circle', 'solid_circle', or 'square' (got {self.face_type!r})"
+            )
         self.auto_diameter = bool(data.get('auto_diameter', False))
         # outer_diameter may be None if auto_diameter is True
         outer_diameter_value = data.get('outer_diameter')
@@ -211,6 +216,7 @@ class ExportSettings:
         self.filepath = filepath  # From command line argument
         self.tolerance = float(data.get('tolerance', 0.00005))
         self.angular_tolerance = float(data.get('angular_tolerance', 0.05))
+        self.stl_ascii = bool(data.get('stl_ascii', True))  # True = ASCII (e.g. GitHub), False = binary
 
 
 class PreviewSettings:
@@ -225,6 +231,22 @@ class PreviewSettings:
         self.elevation = float(data.get('elevation', 30))
         self.azimuth = float(data.get('azimuth', 45))
         self.roll = float(data.get('roll', 0))
+        self.light_azimuth = float(data.get('light_azimuth', 225))
+        self.light_elevation = float(data.get('light_elevation', 45))
+        self.opacity = float(data.get('opacity', 1.0))
+        self.opacity = max(0.0, min(1.0, self.opacity))
+        color_spec = data.get('color', '#b3b3b3')
+        self._color_rgb = self._parse_color(color_spec)
+
+    @staticmethod
+    def _parse_color(spec: Any) -> tuple:
+        """Parse color from hex string (e.g. '#b3b3b3') or name; return (r, g, b) in [0, 1]."""
+        import matplotlib.colors as mcolors
+        if isinstance(spec, (list, tuple)) and len(spec) >= 3:
+            return (float(spec[0]), float(spec[1]), float(spec[2]))
+        s = str(spec).strip()
+        rgb = mcolors.to_rgb(s)
+        return (float(rgb[0]), float(rgb[1]), float(rgb[2]))
 
 
 class Config:

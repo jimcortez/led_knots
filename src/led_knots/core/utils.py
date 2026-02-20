@@ -25,7 +25,11 @@ import numpy as np
 import cadquery as cq
 from cadquery.func import sweep
 from .cache_utils import cache_key_for_part, cache_path_for_part, preview_stl_path_for_part
-from .led_circle import create_led_circle_face
+from .led_circle import (
+    create_led_circle_face,
+    create_solid_circle_face,
+    create_square_face,
+)
 from .preview import render_stl_to_image
 
 logger = logging.getLogger(__name__)
@@ -223,7 +227,8 @@ def render_part(
                 solid,
                 config.export.filepath,
                 tolerance=config.export.tolerance,
-                angularTolerance=config.export.angular_tolerance
+                angularTolerance=config.export.angular_tolerance,
+                opt={'ascii': config.export.stl_ascii},
             )
             logger.info("Exported %s to %s (STL format)", name, config.export.filepath)
             if preview_image_path:
@@ -247,6 +252,7 @@ def render_part(
                     str(preview_stl_path),
                     tolerance=config.export.tolerance,
                     angularTolerance=config.export.angular_tolerance,
+                    opt={'ascii': config.export.stl_ascii},
                 )
                 render_stl_to_image(
                     preview_stl_path,
@@ -268,6 +274,7 @@ def render_part(
                     str(preview_stl_path),
                     tolerance=config.export.tolerance,
                     angularTolerance=config.export.angular_tolerance,
+                    opt={'ascii': config.export.stl_ascii},
                 )
                 render_stl_to_image(
                     preview_stl_path,
@@ -297,6 +304,7 @@ def render_part(
                     str(preview_stl_path),
                     tolerance=config.export.tolerance,
                     angularTolerance=config.export.angular_tolerance,
+                    opt={'ascii': config.export.stl_ascii},
                 )
                 render_stl_to_image(
                     preview_stl_path,
@@ -339,7 +347,12 @@ def render_part(
 
 def draw_part(path, config, aux=None, **face_kwargs):
     """
-    Create and render a part by sweeping an LED circle face along a path.
+    Create and render a part by sweeping a face profile along a path.
+
+    The face type is selected from config.tube_settings.face_type:
+    - "led_circle" (default): LED circle cross-section with oval cavity
+    - "solid_circle": Simple filled circle
+    - "square": Simple filled square
 
     When --export is set, always sweeps and renders (and writes to cache unless --no-cache).
     Otherwise, uses cache when available (unless --no-cache); on cache hit skips the sweep.
@@ -351,7 +364,7 @@ def draw_part(path, config, aux=None, **face_kwargs):
         path: CadQuery Wire or Edge representing the sweep path
         config: Config object with tube_settings, export, server, name, no_cache, only_cache
         aux: Optional auxiliary path for sweep orientation
-        **face_kwargs: Additional keyword arguments to pass to create_led_circle_face
+        **face_kwargs: Additional keyword arguments to pass to the face creation function
                        (e.g., rotation_z). orient_to_path is set automatically.
 
     Returns:
@@ -388,12 +401,20 @@ def draw_part(path, config, aux=None, **face_kwargs):
 
     # We need the solid: sweep once (export, preview, or cache miss)
     logger.debug("Sweeping and rendering.")
-    face_shape = create_led_circle_face(
-        **config.tube_settings.to_led_circle_face_kwargs(
-            orient_to_path=path,
-            **face_kwargs_dict
-        )
+    face_type = config.tube_settings.face_type
+    face_kw = config.tube_settings.to_led_circle_face_kwargs(
+        orient_to_path=path,
+        **face_kwargs_dict
     )
+    if face_type == 'led_circle':
+        face_fn = create_led_circle_face
+    elif face_type == 'solid_circle':
+        face_fn = create_solid_circle_face
+    elif face_type == 'square':
+        face_fn = create_square_face
+    else:
+        raise ValueError(f"Unknown face_type: {face_type!r}")
+    face_shape = face_fn(**face_kw)
     result = sweep(face_shape, path, aux=aux)
 
     # Preview-only (no export): write STL to preview cache, render image, exit without viewer
@@ -410,6 +431,7 @@ def draw_part(path, config, aux=None, **face_kwargs):
                 str(preview_stl_path),
                 tolerance=config.export.tolerance,
                 angularTolerance=config.export.angular_tolerance,
+                opt={'ascii': config.export.stl_ascii},
             )
             render_stl_to_image(
                 preview_stl_path,
