@@ -220,6 +220,29 @@ def _validate_led_circle_face_geometry(
     return not has_errors
 
 
+def _pyramid_ridge_height_at_t(
+    t: float,
+    path_length: float,
+    ridge_width: float,
+    ridge_spacing: float,
+    ridge_depth: float,
+) -> float:
+    """
+    Ridge height at path parameter t (0..1). Triangular wave: 0 -> peak -> 0.
+
+    Creates pyramid-shaped ridges along the path. Each pyramid has base width
+    ridge_width and spacing ridge_spacing; ridge_depth is the peak height.
+    """
+    pitch = ridge_width + ridge_spacing
+    if pitch <= 0:
+        return ridge_depth
+    s = t * path_length  # arc position along path
+    pos_in_pitch = (s % pitch) / pitch  # 0..1 within one pyramid
+    if pos_in_pitch <= 0.5:
+        return 2 * pos_in_pitch * ridge_depth  # ramp up
+    return 2 * (1 - pos_in_pitch) * ridge_depth  # ramp down
+
+
 def create_led_circle_face(
     outer_radius: float,
     wall_thickness: float,
