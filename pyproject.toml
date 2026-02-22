@@ -21,8 +21,11 @@ dependencies = [
     "matplotlib>=3.10.8",
     "numpy>=2.4.1",
     "numpy-stl>=3.2.0",
+    "pillow>=11.0.0",
     "pyknotid",
+    "pyrender>=0.1.45",
     "pyyaml>=6.0",
+    "trimesh>=4.0.0",
     "vtk>=9.0",
     "yacv-server>=0.10.11",
 ]

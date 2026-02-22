@@ -23,14 +23,16 @@ from typing import Any, Callable, Dict, Optional, Tuple, Union
 import numpy as np
 
 import cadquery as cq
-from cadquery.func import sweep
+from cadquery.func import Plane, Location, sweep
 from .cache_utils import cache_key_for_part, cache_path_for_part, preview_stl_path_for_part
 from .led_circle import (
+    _pyramid_ridge_height_at_t,
     create_led_circle_face,
     create_solid_circle_face,
     create_square_face,
 )
-from .preview import render_stl_to_image
+from .path_utils import sample_path_for_profiles, sample_path_for_pyramid_profiles
+from .preview import render_glb_to_image, render_stl_to_image
 
 logger = logging.getLogger(__name__)
 
@@ -298,19 +300,14 @@ def render_part(
                 with open(cache_path, 'wb') as f:
                     f.write(glb_data)
                 logger.debug("Wrote cache %s", cache_path)
-            if preview_image_path and preview_stl_path is not None:
-                cq.exporters.export(
-                    solid,
-                    str(preview_stl_path),
-                    tolerance=config.export.tolerance,
-                    angularTolerance=config.export.angular_tolerance,
-                    opt={'ascii': config.export.stl_ascii},
-                )
-                render_stl_to_image(
-                    preview_stl_path,
-                    Path(preview_image_path),
-                    config.preview_settings,
-                )
+            if preview_image_path and cache_path is not None:
+                cache_path_w = Path(cache_path) if not isinstance(cache_path, Path) else cache_path
+                if cache_path_w.exists():
+                    render_glb_to_image(
+                        cache_path_w,
+                        Path(preview_image_path),
+                        config.preview_settings,
+                    )
             return
 
         logger.error(
@@ -381,7 +378,7 @@ def draw_part(path, config, aux=None, **face_kwargs):
             return None
         with open(cache_path, 'rb') as f:
             glb_bytes = f.read()
-        logger.info("Rendering from cache: %s", cache_path)
+        print(f"Rendering from cache: {cache_path}")
         render_part(glb_bytes, config)
         return None
 
@@ -395,7 +392,7 @@ def draw_part(path, config, aux=None, **face_kwargs):
     ):
         with open(cache_path, 'rb') as f:
             glb_bytes = f.read()
-        logger.info("Cache hit; rendering from cache: %s", cache_path)
+        print(f"Rendering from cache: {cache_path}")
         render_part(glb_bytes, config)
         return None
 
@@ -406,38 +403,128 @@ def draw_part(path, config, aux=None, **face_kwargs):
         orient_to_path=path,
         **face_kwargs_dict
     )
-    if face_type == 'led_circle':
+
+    if face_type == 'led_circle_diffusion_pyramids':
+        # Multisection sweep: ridges rise and fall like pyramids along the path
+        num_samples = 30
+        samples = sample_path_for_profiles(path, num_samples=num_samples)
+        path_length = samples[-1]['arc_length'] if samples else 0.0
+
+        dr = config.tube_settings.diffusion_ridges
+        if not dr:
+            raise ValueError("led_circle_diffusion_pyramids requires diffusion_ridges in config")
+        ridge_width = dr['ridge_width']
+        ridge_spacing = dr['ridge_spacing']
+        ridge_depth = dr['ridge_depth']
+
+        faces = []
+        # Use minimum ridge height to keep topology consistent (same face count per section).
+        # Very small ridges produce degenerate geometry and varying face counts across sections.
+        min_ridge = max(0.5, ridge_depth * 0.2)
+
+        for sample in samples:
+            t = sample['t']
+            ridge_height = max(
+                min_ridge,
+                _pyramid_ridge_height_at_t(
+                    t, path_length, ridge_width, ridge_spacing, ridge_depth
+                ),
+            )
+            dr_at_t = {**dr, 'ridge_height': ridge_height}
+            face_kw_at_t = {**face_kw, 'orient_to_path': None, 'diffusion_ridges': dr_at_t}
+            face_i = create_led_circle_face(**face_kw_at_t)
+            plane = Plane(origin=sample['point'], normal=sample['tangent'])
+            face_i = face_i.moved(Location(plane))
+            # Sort faces by area (descending) for consistent ordering across sections.
+            sorted_faces = sorted(face_i.faces(), key=lambda f: f.Area(), reverse=True)
+            from cadquery.func import compound
+            face_i = compound(sorted_faces)
+            faces.append(face_i)
+
+        try:
+            result = sweep(faces, path, aux=aux)
+        except Exception as e:
+            raise RuntimeError(
+                f"led_circle_diffusion_pyramids multisection sweep failed: {e!r}. "
+                f"num_sections={len(faces)}, path_length={path_length:.1f}mm, "
+                f"ridge_depth={ridge_depth}, ridge_width={ridge_width}, ridge_spacing={ridge_spacing}"
+            ) from e
+    elif face_type == 'solid_circle_pyramid':
+        # Multisection sweep: solid_circle with varying radius (pyramid bulge).
+        # Sections align with pyramid pattern: pitch = ridge_width + ridge_spacing; total sections
+        # = sections_per_pyramid * num_pyramids so the pattern repeats correctly.
+        dr = config.tube_settings.diffusion_ridges or {}
+        ridge_width = dr.get('ridge_width', 2.0)
+        ridge_spacing = dr.get('ridge_spacing', 1.0)
+        ridge_depth = dr.get('ridge_depth', 2.5)
+        pitch = ridge_width + ridge_spacing
+        sections_per_pyramid = 5  # valley, rise, peak, fall, valley
+
+        samples = sample_path_for_pyramid_profiles(
+            path, pitch=pitch, sections_per_pyramid=sections_per_pyramid
+        )
+        path_length = samples[-1]['arc_length']
+        num_pyramids = path_length / pitch
+        logger.info(
+            "solid_circle_pyramid: %d sections, %.1f mm path, ~%.0f pyramids (pitch=%.1f mm)",
+            len(samples), path_length, num_pyramids, pitch,
+        )
+        base_radius = config.tube_settings.outer_radius
+
+        faces = []
+        for sample in samples:
+            t = sample['t']
+            bulge = _pyramid_ridge_height_at_t(t, path_length, ridge_width, ridge_spacing, ridge_depth)
+            radius = base_radius + bulge
+            face_i = create_solid_circle_face(
+                outer_radius=radius,
+                wall_thickness=face_kw.get('wall_thickness', 1.0),
+                orient_to_path=None,
+            )
+            plane = Plane(origin=sample['point'], normal=sample['tangent'])
+            face_i = face_i.moved(Location(plane))
+            faces.append(face_i)
+
+        result = sweep(faces, path, aux=aux)
+    elif face_type == 'led_circle':
         face_fn = create_led_circle_face
+        face_shape = face_fn(**face_kw)
+        result = sweep(face_shape, path, aux=aux)
     elif face_type == 'solid_circle':
         face_fn = create_solid_circle_face
+        face_shape = face_fn(**face_kw)
+        result = sweep(face_shape, path, aux=aux)
     elif face_type == 'square':
         face_fn = create_square_face
+        face_shape = face_fn(**face_kw)
+        result = sweep(face_shape, path, aux=aux)
     else:
         raise ValueError(f"Unknown face_type: {face_type!r}")
-    face_shape = face_fn(**face_kw)
-    result = sweep(face_shape, path, aux=aux)
 
-    # Preview-only (no export): write STL to preview cache, render image, exit without viewer
+    # Preview-only (no export): write GLB to cache, render image from GLB, exit without viewer
     if preview_filepath and not config.export.filepath:
         os.environ['YACV_DISABLE_SERVER'] = '1'
         solid = result.val() if hasattr(result, 'val') else result
-        preview_stl_path = preview_stl_path_for_part(
-            config, path, aux=aux, face_kwargs=face_kwargs_dict
-        )
-        if preview_stl_path is not None:
-            preview_stl_path.parent.mkdir(parents=True, exist_ok=True)
-            cq.exporters.export(
-                solid,
-                str(preview_stl_path),
-                tolerance=config.export.tolerance,
-                angularTolerance=config.export.angular_tolerance,
-                opt={'ascii': config.export.stl_ascii},
-            )
-            render_stl_to_image(
-                preview_stl_path,
-                Path(preview_filepath),
-                config.preview_settings,
-            )
+        if cache_path is not None:
+            from yacv_server import yacv, show
+            show(solid, names=config.name or "Knot")
+            export_data = yacv.export(config.name or "Knot")
+            if export_data is not None:
+                glb_data, _ = export_data
+                cache_path = Path(cache_path) if not isinstance(cache_path, Path) else cache_path
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(cache_path, 'wb') as f:
+                    f.write(glb_data)
+                logger.debug("Wrote cache %s for preview", cache_path)
+                render_glb_to_image(
+                    cache_path,
+                    Path(preview_filepath),
+                    config.preview_settings,
+                )
+            else:
+                logger.warning("Could not export GLB for preview; skipping preview image.")
+        else:
+            logger.warning("No cache path for preview; skipping preview image.")
         return result
 
     # Export (with optional preview): render_part exports and optionally generates preview image
