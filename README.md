@@ -1,5 +1,7 @@
 # LED Knots
 
+![Preview of all knot types](assets/previews.gif)
+
 A Python tool for generating 3D printable mathematical knot models designed to house LED strips. Built using the [CadQuery](https://cadquery.readthedocs.io/) CAD engine.
 
 ## Overview
