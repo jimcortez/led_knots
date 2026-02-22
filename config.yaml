@@ -1,60 +1,93 @@
-# Bounding box for knot path scaling (mm)
+# =============================================================================
+# LED Knots – config.yaml
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Output bounds: bounding box for knot path scaling
+# -----------------------------------------------------------------------------
 output_bounds:
-  width: 200
-  length: 108
-  height: 100
+  width: 200    # mm
+  length: 108   # mm
+  height: 100   # mm
 
-tube_settings:
-  # Cross-section face type: led_circle (default), led_circle_diffusion_pyramids, solid_circle, or square
-  face_type: led_circle
-  # Outer diameter of the tube in mm
-  outer_diameter: 30
-  # Wall thickness of the outer ring in mm
-  wall_thickness: 1.0
-  # Wall thickness around the oval cavity in mm (led_circle face only)
-  oval_wall_thickness: 0.5
-  # Width of connectors between inner ring and center oval in mm (led_circle face only)
-  connector_width: 0.5
-  # If true, double the LED cavity height to fit strips on both sides
-  double_sided_led: true
-  # Extra width tolerance for LED strip fit in mm
-  led_tolerance_width: 1.0
-  # Extra height tolerance for LED strip fit in mm
-  led_tolerance_height: 1.0
-  # Diffusion ridges on the oval surface; set to false to disable
-  diffusion_ridges:
-    ridge_height: 2.5  # mm
-    ridge_width: 2.0  # mm (horizontal size)
-    ridge_spacing: 1  # mm
-    ridge_depth: 2.5  # mm (peak height of pyramid along path)
-    # sections_per_pyramid: 3
+# Active cross-section face: led_circle | led_circle_diffusion_pyramids |
+# solid_circle | solid_circle_pyramid | square
+face_type: led_circle
 
-# Physical dimensions of the LED strip
-led_strip_settings:
-  width: 10  # mm
-  height: 1.8  # mm
-  led_count: 60  # LEDs per meter
-  min_90_degtree_twist_distance: 5  # mm minimum distance for 90° twist
+# -----------------------------------------------------------------------------
+# Face-specific settings (keyed by face type)
+# Use inherit_from to inherit from another face and override keys.
+# -----------------------------------------------------------------------------
+face_settings:
 
+  led_circle:
+    outer_diameter: 30      # mm – tube outer diameter
+    wall_thickness: 1.0     # mm – outer ring wall thickness
+    rect_inner_x: 4.6       # mm – inner cavity X (e.g. strip height×2 + tolerance)
+    rect_inner_y: 11.0      # mm – inner cavity Y (e.g. strip width + tolerance)
+    oval_wall_thickness: 0.5   # mm – wall around oval cavity
+    connector_width: 0.5       # mm – width of connectors to center oval
+    diffusion_ridges:
+      ridge_height: 2.5    # mm
+      ridge_width: 2.0     # mm – horizontal size
+      ridge_spacing: 1      # mm
+      ridge_depth: 2.5     # mm – peak height of pyramid along path
+
+  led_circle_diffusion_pyramids:
+    inherit_from: led_circle
+    diffusion_ridges:
+      ridge_height: 3.0    # mm – override; pyramids use this along path
+      ridge_width: 2.0     # mm
+      ridge_spacing: 1     # mm
+      ridge_depth: 2.5    # mm
+
+  solid_circle:
+    inherit_from: led_circle
+
+  solid_circle_pyramid:
+    inherit_from: solid_circle
+    wall_thickness: 1.0    # mm
+    diffusion_ridges:
+      ridge_width: 2.0     # mm
+      ridge_spacing: 1     # mm
+      ridge_depth: 2.5     # mm
+
+  square:
+    outer_width: 30        # mm – side length of square
+
+# -----------------------------------------------------------------------------
+# Path / twist limits
+# -----------------------------------------------------------------------------
+path:
+  min_90_degree_twist_distance: 5   # mm – minimum path length for 90° twist
+
+# -----------------------------------------------------------------------------
+# Server (cache, optional yacv overrides)
+# -----------------------------------------------------------------------------
 server:
-  # Directory for cached GLB objects
-  object_cache: cache/glb_blobs
+  object_cache: cache/glb_blobs   # directory path
 
+# -----------------------------------------------------------------------------
+# Export (3D file output)
+# -----------------------------------------------------------------------------
 export:
-  tolerance: 0.0005  # Export tolerance (STL, STEP, 3MF)
-  angular_tolerance: 0.05  # Angular tolerance in radians
-  stl_ascii: true  # true = ASCII (GitHub renders), false = binary (smaller)
+  tolerance: 0.0005         # linear tolerance
+  angular_tolerance: 0.05   # rad
+  stl_ascii: true           # true = ASCII STL, false = binary
 
+# -----------------------------------------------------------------------------
+# Preview (STL → image)
+# -----------------------------------------------------------------------------
 preview:
-  stl_cache: cache/preview  # Directory for preview STL cache
-  image_width: 800  # Preview image width in pixels
-  image_height: 600  # Preview image height in pixels
-  dpi: 100
-  elevation: 30  # 3D view elevation in degrees
-  azimuth: 45  # 3D view azimuth in degrees
-  roll: 0  # 3D view roll in degrees
-  light_azimuth: 225  # Light direction azimuth for shading
-  light_elevation: 45  # Light direction elevation for shading
-  color: '#b3b3b3'  # Model color (hex or name)
-  opacity: 1.0  # Model opacity (0.0 = transparent, 1.0 = opaque)
-  background: '#1a1a2e'  # Preview image background (hex or name, e.g. white or black)
+  stl_cache: cache/preview   # directory path
+  image_width: 800           # px
+  image_height: 600          # px
+  dpi: 100                   # dots per inch
+  elevation: 30              # deg – 3D view elevation
+  azimuth: 45                # deg – 3D view azimuth
+  roll: 0                    # deg – 3D view roll
+  light_azimuth: 225         # deg – light direction azimuth
+  light_elevation: 45        # deg – light direction elevation
+  color: '#b3b3b3'           # hex or name – model color
+  opacity: 1.0               # 0.0–1.0
+  background: '#1a1a2e'      # hex or name – background color

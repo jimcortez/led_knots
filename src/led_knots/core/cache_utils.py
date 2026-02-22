@@ -2,7 +2,7 @@
 Cache key utilities for GLB object cache.
 
 Builds deterministic cache filename stems from part name, path geometry,
-rotation/face kwargs, and config (output_bounds, tube_settings, led_strip_settings).
+rotation/face kwargs, and config (output_bounds, tube_settings, path_settings).
 """
 
 import hashlib
@@ -75,7 +75,7 @@ def _round_for_hash(x: float) -> float:
 
 def config_settings_hash(config) -> str:
     """
-    Hash output_bounds, tube_settings, and led_strip_settings so cache keys change
+    Hash output_bounds, tube_settings (active face), and path_settings so cache keys change
     when these settings change. Uses 5 decimal places for floats for stability.
     """
     ob = config.output_bounds
@@ -87,17 +87,14 @@ def config_settings_hash(config) -> str:
         }
     }
     ts = config.tube_settings
-    outer = ts.outer_diameter
     out['tube_settings'] = {
         'face_type': ts.face_type,
-        'outer_diameter': _round_for_hash(outer) if outer is not None else None,
+        'outer_radius': _round_for_hash(ts.outer_radius),
         'wall_thickness': _round_for_hash(ts.wall_thickness),
         'oval_wall_thickness': _round_for_hash(ts.oval_wall_thickness),
         'connector_width': _round_for_hash(ts.connector_width),
-        'double_sided_led': ts.double_sided_led,
-        'led_tolerance_width': _round_for_hash(ts.led_tolerance_width),
-        'led_tolerance_height': _round_for_hash(ts.led_tolerance_height),
-        'auto_diameter': ts.auto_diameter,
+        'rect_inner_x': _round_for_hash(ts.rect_inner_x),
+        'rect_inner_y': _round_for_hash(ts.rect_inner_y),
     }
     if ts.diffusion_ridges is not None:
         out['tube_settings']['diffusion_ridges'] = {
@@ -105,13 +102,12 @@ def config_settings_hash(config) -> str:
         }
     else:
         out['tube_settings']['diffusion_ridges'] = None
+    if ts.face_type == 'solid_circle_pyramid':
+        out['tube_settings']['_pyramid_sampling_version'] = 1
 
-    ls = config.led_strip_settings
-    out['led_strip_settings'] = {
-        'width': _round_for_hash(ls.width),
-        'height': _round_for_hash(ls.height),
-        'led_count': ls.led_count,
-        'min_90_degree_twist_distance': _round_for_hash(ls.min_90_degree_twist_distance),
+    ps = config.path_settings
+    out['path_settings'] = {
+        'min_90_degree_twist_distance': _round_for_hash(ps.min_90_degree_twist_distance),
     }
     blob = str(sorted(out.items()))
     return hashlib.sha256(blob.encode()).hexdigest()[:_PATH_HASH_DIGEST_LEN]
@@ -126,7 +122,7 @@ def cache_key_for_part(
 ) -> str:
     """
     Build the cache filename stem: slug(name)-slug(rotation_params)-config_hash-path_hash.
-    Includes output_bounds, tube_settings, and led_strip_settings when config is provided.
+    Includes output_bounds, tube_settings, and path_settings when config is provided.
     Used as the base for cache_path (e.g. cache_dir / f"{cache_key_for_part(...)}.glb").
     """
     name_slug = slugify(name or "knot")

@@ -14,6 +14,54 @@ from .utils import parse_args
 
 logger = logging.getLogger(__name__)
 
+# Face types allowed for top-level face_type and in face_settings keys.
+VALID_FACE_TYPES = ('led_circle', 'led_circle_diffusion_pyramids', 'solid_circle', 'solid_circle_pyramid', 'square')
+
+
+def _deep_merge_face_settings(base: Dict[str, Any], current: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Merge current over base. Nested dicts (e.g. diffusion_ridges) are merged by key;
+    keys in current override base. 'inherit_from' is not copied into the result.
+    """
+    result = dict(base)
+    for key, value in current.items():
+        if key == 'inherit_from':
+            continue
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge_face_settings(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def resolve_face_settings(face_settings_dict: Dict[str, Any], face_type: str, _stack: Optional[set] = None) -> Dict[str, Any]:
+    """
+    Resolve face settings for the given face type, applying inherit_from and deep merge.
+    Returns a single dict with no inherit_from key. Detects cycles and missing parents.
+    """
+    if face_settings_dict is None or not face_settings_dict:
+        return {}
+    if _stack is None:
+        _stack = set()
+    if face_type in _stack:
+        raise ValueError(f"face_settings inheritance cycle: {' -> '.join(_stack)} -> {face_type}")
+    block = face_settings_dict.get(face_type)
+    if block is None:
+        return {}
+    block = dict(block)  # don't mutate config
+    inherit_from = block.pop('inherit_from', None)
+    if inherit_from is None:
+        return block
+    parent = str(inherit_from).strip()
+    if parent not in face_settings_dict:
+        raise ValueError(f"face_settings: {face_type!r} has inherit_from: {parent!r} but that face type is not defined")
+    _stack.add(face_type)
+    try:
+        base = resolve_face_settings(face_settings_dict, parent, _stack)
+    finally:
+        _stack.discard(face_type)
+    return _deep_merge_face_settings(base, block)
+
 
 class OutputBounds:
     """Output bounds configuration."""
@@ -24,14 +72,10 @@ class OutputBounds:
         self.height = float(data.get('height', 100.0))
 
 
-class LedStripSettings:
-    """LED strip settings configuration."""
-    
+class PathSettings:
+    """Path/twist configuration (e.g. min distance for 90° twist)."""
+
     def __init__(self, data: Dict[str, Any]):
-        self.width = float(data.get('width', 10.0))
-        self.height = float(data.get('height', 1.8))
-        self.led_count = int(data.get('led_count', 300))
-        # Support typo key min_90_degtree_twist_distance and correct min_90_degree_twist_distance
         twist_dist = data.get('min_90_degree_twist_distance') or data.get('min_90_degtree_twist_distance', 90.0)
         self.min_90_degree_twist_distance = float(twist_dist)
         if self.min_90_degree_twist_distance <= 0:
@@ -41,29 +85,32 @@ class LedStripSettings:
 
 
 class TubeSettings:
-    """Tube settings configuration."""
-    
-    def __init__(self, data: Dict[str, Any]):
-        self.face_type = str(data.get('face_type', 'led_circle'))
-        if self.face_type not in ('led_circle', 'led_circle_diffusion_pyramids', 'solid_circle', 'solid_circle_pyramid', 'square'):
+    """Active face configuration built from resolved face_settings for the selected face_type."""
+
+    def __init__(self, face_type: str, face_data: Dict[str, Any]):
+        self.face_type = str(face_type)
+        if self.face_type not in VALID_FACE_TYPES:
             raise ValueError(
-                f"face_type must be 'led_circle', 'led_circle_diffusion_pyramids', 'solid_circle', or 'square' (got {self.face_type!r})"
+                f"face_type must be one of {VALID_FACE_TYPES!r} (got {self.face_type!r})"
             )
-        self.auto_diameter = bool(data.get('auto_diameter', False))
-        # outer_diameter may be None if auto_diameter is True
-        outer_diameter_value = data.get('outer_diameter')
-        if outer_diameter_value is not None:
-            self.outer_diameter = float(outer_diameter_value)
+        data = dict(face_data) if face_data else {}
+
+        # Square uses outer_width; others use outer_diameter
+        if self.face_type == 'square':
+            ow = data.get('outer_width')
+            self.outer_diameter = float(ow) if ow is not None else None  # not used for square
+            self._outer_width = float(ow) if ow is not None else None
         else:
-            self.outer_diameter = None
+            od = data.get('outer_diameter')
+            self.outer_diameter = float(od) if od is not None else None
+            self._outer_width = None
+
         self.wall_thickness = float(data.get('wall_thickness', 1.0))
         self.oval_wall_thickness = float(data.get('oval_wall_thickness', 2.0))
         self.connector_width = float(data.get('connector_width', 1.0))
-        self.double_sided_led = bool(data.get('double_sided_led', True))
-        self.led_tolerance_width = float(data.get('led_tolerance_width', 1.0))
-        self.led_tolerance_height = float(data.get('led_tolerance_height', 1.0))
-        
-        # Diffusion ridges configuration
+        self.rect_inner_x = float(data.get('rect_inner_x', 4.0))
+        self.rect_inner_y = float(data.get('rect_inner_y', 12.0))
+
         diffusion_ridges_data = data.get('diffusion_ridges')
         if diffusion_ridges_data is False or diffusion_ridges_data is None:
             self.diffusion_ridges = None
@@ -76,97 +123,40 @@ class TubeSettings:
                 'ridge_depth': float(diffusion_ridges_data.get('ridge_depth', ridge_height)),
             }
         else:
-            # If it's True or some other truthy value, use defaults
             self.diffusion_ridges = {
                 'ridge_height': 0.5,
                 'ridge_width': 1.0,
                 'ridge_spacing': 0.0,
                 'ridge_depth': 0.5,
             }
-        
-        self._led_strip_settings: Optional['LedStripSettings'] = None
-    
-    def set_led_strip_settings(self, led_strip_settings: 'LedStripSettings'):
-        """Set the LED strip settings reference and calculate diameter if auto_diameter is enabled."""
-        self._led_strip_settings = led_strip_settings
-        
-        # Calculate outer_diameter automatically if auto_diameter is True
-        if self.auto_diameter:
-            if led_strip_settings is None or led_strip_settings.led_count <= 0:
-                raise ValueError("auto_diameter requires led_strip_settings with valid led_count")
-            
-            # Distance between LEDs in mm: 1000mm (1 meter) / led_count
-            distance_between_leds = 1000.0 / led_strip_settings.led_count
-            
-            # Inner radius = distance between LEDs
-            inner_radius = distance_between_leds
-            
-            # Inner diameter = 2 * inner_radius
-            inner_diameter = 2.0 * inner_radius
-            
-            # Outer diameter = inner_diameter + 2 * wall_thickness
-            self.outer_diameter = inner_diameter + 2.0 * self.wall_thickness
-        else:
-            # Validate that outer_diameter is set when auto_diameter is False
-            if self.outer_diameter is None:
-                raise ValueError("outer_diameter must be set when auto_diameter is False")
-    
+
     @property
     def outer_radius(self) -> float:
-        """Calculate outer radius from outer diameter."""
+        """Outer radius in mm. For square, outer_width/2; for circles, outer_diameter/2."""
+        if self.face_type == 'square':
+            if self._outer_width is None:
+                raise ValueError("square face requires outer_width in face_settings")
+            return self._outer_width / 2.0
         if self.outer_diameter is None:
-            raise ValueError("outer_diameter is not set. Ensure set_led_strip_settings() is called if using auto_diameter.")
+            raise ValueError("outer_diameter must be set in face_settings for face_type %r" % self.face_type)
         return self.outer_diameter / 2.0
-    
+
     def to_led_circle_face_kwargs(self, **kwargs) -> Dict[str, Any]:
         """
-        Return a dictionary of parameters suitable for create_led_circle_face.
-        
-        This includes all tube_settings parameters that are used by create_led_circle_face.
-        The inner rectangle dimensions (rect_inner_x, rect_inner_y) are automatically calculated
-        from LED strip settings if available.
-        
-        Can be used with **kwargs unpacking: 
-            create_led_circle_face(**config.tube_settings.to_led_circle_face_kwargs())
-        
-        Or with overrides:
-            create_led_circle_face(**config.tube_settings.to_led_circle_face_kwargs(orient_to_path=path, rotation_z=90))
-        
-        Args:
-            **kwargs: Additional parameters to merge with the default values. 
-                     These will override any default values with the same key.
-        
-        Returns:
-            Dict with keys: outer_radius, wall_thickness, oval_wall_thickness, connector_width,
-            diffusion_ridges (if enabled), rect_inner_x, rect_inner_y (if led_strip_settings available),
-            plus any additional keys provided in kwargs.
+        Return a dictionary of parameters suitable for create_led_circle_face (or create_square_face).
+        rect_inner_x, rect_inner_y and outer_radius come from resolved face_settings.
         """
         base_kwargs = {
             'outer_radius': self.outer_radius,
             'wall_thickness': self.wall_thickness,
-            'min_oval_wall_thickness': self.oval_wall_thickness,  # Use oval_wall_thickness as minimum to respect desired thickness
+            'min_oval_wall_thickness': self.oval_wall_thickness,
             'oval_wall_thickness': self.oval_wall_thickness,
             'connector_width': self.connector_width,
+            'rect_inner_x': self.rect_inner_x,
+            'rect_inner_y': self.rect_inner_y,
         }
-        
-        # Add diffusion_ridges if configured
         if self.diffusion_ridges is not None:
             base_kwargs['diffusion_ridges'] = self.diffusion_ridges
-        
-        # Calculate inner rectangle dimensions from LED strip settings if available
-        if self._led_strip_settings is not None:
-            # Width: use LED strip width + tolerance
-            rect_inner_y = self._led_strip_settings.width + self.led_tolerance_width
-            
-            # Height: use LED strip height + tolerance, double if double_sided_led is true
-            rect_inner_x = self._led_strip_settings.height + self.led_tolerance_height
-            if self.double_sided_led:
-                rect_inner_x *= 2.0
-            
-            base_kwargs['rect_inner_x'] = rect_inner_x
-            base_kwargs['rect_inner_y'] = rect_inner_y
-        
-        # Merge additional kwargs, allowing them to override defaults
         base_kwargs.update(kwargs)
         return base_kwargs
 
@@ -279,11 +269,13 @@ class Config:
         
         # Initialize configuration sections
         self.output_bounds = OutputBounds(config_data.get('output_bounds', {}))
-        self.tube_settings = TubeSettings(config_data.get('tube_settings', {}))
-        self.led_strip_settings = LedStripSettings(config_data.get('led_strip_settings', {}))
-        
-        # Link LED strip settings to tube settings so it can be used automatically
-        self.tube_settings.set_led_strip_settings(self.led_strip_settings)
+        face_type = str(config_data.get('face_type', 'led_circle'))
+        if face_type not in VALID_FACE_TYPES:
+            raise ValueError(f"face_type must be one of {VALID_FACE_TYPES!r} (got {face_type!r})")
+        face_settings_raw = config_data.get('face_settings') or {}
+        face_data = resolve_face_settings(face_settings_raw, face_type)
+        self.tube_settings = TubeSettings(face_type, face_data)
+        self.path_settings = PathSettings(config_data.get('path', {}))
         
         # Parse command line arguments
         args = parse_args(description=description or "Create and render a knot model")

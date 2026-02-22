@@ -100,6 +100,122 @@ def sample_path_curvature(path, num_samples: int = 50) -> list:
     return samples
 
 
+def sample_path_for_profiles(path, num_samples: int = 50) -> list:
+    """
+    Sample the path for multisection sweep profile placement.
+
+    Returns position, tangent, and arc length at each sample point for creating
+    profiles that coincide with the path.
+
+    Args:
+        path: A CadQuery Wire or Edge representing the sweep path
+        num_samples: Number of sample points along the path (default: 50)
+
+    Returns:
+        List of dicts, each containing:
+          - t: parameter value (0 to 1)
+          - point: CadQuery Vector (path.positionAt(t))
+          - tangent: CadQuery Vector (path.tangentAt(t))
+          - arc_length: cumulative arc length from start to this point (chord-length approx)
+    """
+    samples = []
+    cumulative_arc = 0.0
+    prev_pos = None
+
+    for i in range(num_samples):
+        t = i / (num_samples - 1) if num_samples > 1 else 1.0
+
+        point = path.positionAt(t)
+        tangent_vec = path.tangentAt(t)
+
+        if prev_pos is not None:
+            curr_arr = np.array([point.x, point.y, point.z])
+            prev_arr = np.array([prev_pos.x, prev_pos.y, prev_pos.z])
+            cumulative_arc += float(np.linalg.norm(curr_arr - prev_arr))
+        prev_pos = point
+
+        samples.append({
+            't': t,
+            'point': point,
+            'tangent': tangent_vec,
+            'arc_length': cumulative_arc,
+        })
+
+    return samples
+
+
+def sample_path_for_pyramid_profiles(
+    path,
+    pitch: float,
+    sections_per_pyramid: int = 5,
+    dense_samples: int = 500,
+) -> list:
+    """
+    Sample the path at pyramid-aligned positions for multisection sweep.
+
+    Sections are placed so the pyramid pattern (ridge_width + ridge_spacing)
+    repeats correctly. Total sections = sections_per_pyramid * num_pyramids,
+    where num_pyramids = path_length / pitch.
+
+    Args:
+        path: CadQuery Wire or Edge representing the sweep path
+        pitch: Length of one pyramid cycle in mm (ridge_width + ridge_spacing)
+        sections_per_pyramid: Faces per pyramid to define the shape (e.g., 5 for valley-rise-peak-fall-valley)
+        dense_samples: Samples for arc-length lookup (default: 500)
+
+    Returns:
+        List of dicts with t, point, tangent, arc_length (same format as sample_path_for_profiles)
+    """
+    if pitch <= 0:
+        raise ValueError("pitch must be positive")
+    if sections_per_pyramid < 2:
+        raise ValueError("sections_per_pyramid must be >= 2")
+
+    # Dense sample for arc-length to t mapping
+    dense = sample_path_for_profiles(path, num_samples=dense_samples)
+    path_length = dense[-1]['arc_length']
+
+    # Step between sections within one pyramid
+    step = pitch / (sections_per_pyramid - 1)
+    # Arc positions: 0, step, 2*step, ... up to path_length
+    s_values = []
+    s = 0.0
+    while s < path_length - 1e-6:  # small tolerance for float
+        s_values.append(s)
+        s += step
+    s_values.append(path_length)
+
+    def _t_for_arc_length(s_target: float) -> float:
+        """Interpolate t from arc length using dense lookup."""
+        if s_target <= 0:
+            return 0.0
+        if s_target >= path_length:
+            return 1.0
+        for i in range(len(dense) - 1):
+            s_lo, s_hi = dense[i]['arc_length'], dense[i + 1]['arc_length']
+            if s_lo <= s_target <= s_hi:
+                t_lo, t_hi = dense[i]['t'], dense[i + 1]['t']
+                if s_hi - s_lo > 1e-10:
+                    frac = (s_target - s_lo) / (s_hi - s_lo)
+                    return t_lo + frac * (t_hi - t_lo)
+                return t_lo
+        return 1.0
+
+    samples = []
+    for s_val in s_values:
+        t = _t_for_arc_length(s_val)
+        point = path.positionAt(t)
+        tangent = path.tangentAt(t)
+        samples.append({
+            't': t,
+            'point': point,
+            'tangent': tangent,
+            'arc_length': s_val,
+        })
+
+    return samples
+
+
 def compute_optimal_twist_angles(
     curvature_data: list,
     initial_rotation: float = 0.0,
@@ -365,7 +481,7 @@ def build_ribbon_aux_spine(
 
     Args:
         path: CadQuery Wire or Edge representing the sweep path.
-        config: Config object with led_strip_settings.min_90_degree_twist_distance.
+        config: Config object with path_settings.min_90_degree_twist_distance.
         num_samples: Number of sample points along the path (default: 50).
         spine_offset_radius: Distance to offset the aux spine from the path (default: 5.0).
         flexible_tolerance: Max curvature (1/mm) in flexible direction (default: 0.01).
@@ -377,7 +493,7 @@ def build_ribbon_aux_spine(
         Tuple of (aux_spine, initial_rotation). Use aux_spine in sweep(face, path, aux=aux_spine)
         and initial_rotation in create_led_circle_face(..., rotation_z=initial_rotation).
     """
-    max_twist_rate = 90.0 / config.led_strip_settings.min_90_degree_twist_distance  # degrees/mm
+    max_twist_rate = 90.0 / config.path_settings.min_90_degree_twist_distance  # degrees/mm
 
     curvature_data = sample_path_curvature(path, num_samples=num_samples)
     n = len(curvature_data)
@@ -417,7 +533,7 @@ def build_ribbon_aux_spine(
                     "Twist required between t=%.4f and t=%.4f exceeds max rate: "
                     "required %.2f deg over %.2f mm arc (%.2f deg/mm), max allowed %.2f deg/mm "
                     "(min_90_degree_twist_distance=%.1f mm). "
-                    "Increase path length (e.g. output bounds) or increase min_90_degtree_twist_distance in config."
+                    "Increase path length (e.g. output bounds) or increase min_90_degree_twist_distance in path config."
                     % (
                         t_i,
                         t_j,
@@ -425,7 +541,7 @@ def build_ribbon_aux_spine(
                         arc_length_ij,
                         required_rate,
                         max_twist_rate,
-                        config.led_strip_settings.min_90_degree_twist_distance,
+                        config.path_settings.min_90_degree_twist_distance,
                     )
                 )
 

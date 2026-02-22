@@ -89,8 +89,9 @@ When you omit `--export` and `--server`, the model is shown in the default viewe
 LED Knots uses a centralized configuration system via `config.yaml` in the project root. This file controls:
 
 - **Output bounds**: Dimensions for the generated models (width, length, height)
-- **Tube settings**: Cross-section parameters (auto-diameter or manual outer diameter, wall thickness, oval wall thickness, connector width, LED tolerances, diffusion ridges)
-- **LED strip settings**: LED strip specifications (width, height, LED count, twist requirements)
+- **face_type**: Top-level key selecting the cross-section face (e.g. `led_circle`, `square`)
+- **Face settings**: Per-face options keyed by face name: `outer_diameter` or `outer_width` (for square), `wall_thickness` (e.g. in led_circle), `rect_inner_x` / `rect_inner_y` (led_circle cavity, with comments referencing original strip values), oval/connector/diffusion options. Use `inherit_from` to inherit from another face and override keys.
+- **Path**: `min_90_degree_twist_distance` (mm) for twist rate limits along the path
 - **Server**: Object cache location and optional yacv-server options (host, port, colors, etc.)
 - **Export settings**: Export tolerances for 3D file formats
 
@@ -117,36 +118,67 @@ Cache is **not** used when you pass `--export`: the model is always built from t
 
 ### Configuration details
 
-#### Auto-Diameter Calculation
+#### Face type and face settings
 
-When `auto_diameter: true` is set in `tube_settings`, the outer diameter is automatically calculated based on the LED count to optimize light diffusion. The calculation ensures the distance between LEDs matches the inner radius of the tube, providing optimal spacing for uniform light distribution.
+- **face_type** is a top-level key (e.g. `face_type: led_circle`). It selects which face from `face_settings` is used.
+- **face_settings** is keyed by face name (`led_circle`, `led_circle_diffusion_pyramids`, `solid_circle`, `solid_circle_pyramid`, `square`). Each face defines its own dimensions and options:
+  - **led_circle**: `outer_diameter`, `wall_thickness`, `rect_inner_x`, `rect_inner_y` (cavity for LED strip; comments in config can reference original strip width/height + tolerances), `oval_wall_thickness`, `connector_width`, `diffusion_ridges`.
+  - **solid_circle**: `outer_diameter` only.
+  - **solid_circle_pyramid**: `outer_diameter`, `wall_thickness`, `diffusion_ridges`.
+  - **square**: `outer_width` (side length in mm).
+- **inherit_from**: A face entry can set `inherit_from: <face_name>`. Resolved settings are the inherited face’s settings (recursively), then the current block’s keys overlaid (nested dicts deep-merged). Cycles and missing parents cause an error.
+
+Example:
 
 ```yaml
-tube_settings:
-  auto_diameter: true  # Automatically calculate diameter from LED count
-  # outer_diameter: 30  # Only needed if auto_diameter is false
+face_type: led_circle
+
+face_settings:
+  led_circle:
+    outer_diameter: 30
+    wall_thickness: 1.0
+    rect_inner_x: 4.6   # from strip height 1.8*2 (double-sided) + tolerance 1
+    rect_inner_y: 11.0  # from strip width 10 + tolerance 1
+    oval_wall_thickness: 0.5
+    connector_width: 0.5
+    diffusion_ridges: { ridge_height: 2.5, ridge_width: 2.0, ridge_spacing: 1, ridge_depth: 2.5 }
+  led_circle_diffusion_pyramids:
+    inherit_from: led_circle
+    diffusion_ridges: { ridge_height: 3.0, ... }  # override
+  solid_circle:
+    outer_diameter: 30
+  square:
+    outer_width: 30
+```
+
+#### Path settings
+
+The **path** section provides twist limits along the sweep path:
+
+```yaml
+path:
+  min_90_degree_twist_distance: 5  # mm minimum distance for 90° twist
 ```
 
 #### Diffusion Ridges
 
-Optional triangular ridges can be added to the outside of the oval cross-section to enhance light diffusion and create visual effects. Configure ridges in `tube_settings`:
+Optional triangular ridges on the oval cross-section (e.g. for `led_circle` or `led_circle_diffusion_pyramids`) are configured under **face_settings**:
 
 ```yaml
-tube_settings:
-  diffusion_ridges:
-    ridge_height: 2.5  # Height of ridges in mm
-    ridge_width: 2.0   # Width of each ridge base in mm
-    ridge_spacing: 1   # Spacing between ridges in mm
+face_settings:
+  led_circle:
+    diffusion_ridges:
+      ridge_height: 2.5
+      ridge_width: 2.0
+      ridge_spacing: 1
+      ridge_depth: 2.5
 ```
 
-Set `diffusion_ridges: false` or omit the section to disable ridges.
+Set `diffusion_ridges: false` or omit the key to disable ridges for that face.
 
-#### Enhanced LED Strip Integration
+#### LED cavity dimensions (led_circle)
 
-The configuration system now automatically calculates inner rectangle dimensions from LED strip settings, accounting for:
-- LED strip width and height
-- Tolerance values for fit
-- Double-sided LED support (automatically doubles height when enabled)
+Inner rectangle dimensions `rect_inner_x` and `rect_inner_y` in **face_settings.led_circle** define the cavity for the LED strip. Set them to match your strip width/height plus tolerances (e.g. strip width 10 mm + tolerance 1 mm → `rect_inner_y: 11.0`; strip height 1.8 mm, double-sided, + tolerance → `rect_inner_x: 4.6`). The config file comments can reference these original values.
 
 ### Customizing Configuration
 
@@ -158,9 +190,12 @@ output_bounds:
   width: 150
   height: 200
 
-tube_settings:
-  outer_diameter: 35
-  wall_thickness: 1.5
+face_type: led_circle
+
+face_settings:
+  led_circle:
+    outer_diameter: 35
+    wall_thickness: 1.5
 ```
 
 All knot modules automatically use these configuration values, making it easy to adjust model dimensions and tube parameters across all knot types.
