@@ -45,9 +45,9 @@ class TubeSettings:
     
     def __init__(self, data: Dict[str, Any]):
         self.face_type = str(data.get('face_type', 'led_circle'))
-        if self.face_type not in ('led_circle', 'solid_circle', 'square'):
+        if self.face_type not in ('led_circle', 'led_circle_diffusion_pyramids', 'solid_circle', 'solid_circle_pyramid', 'square'):
             raise ValueError(
-                f"face_type must be 'led_circle', 'solid_circle', or 'square' (got {self.face_type!r})"
+                f"face_type must be 'led_circle', 'led_circle_diffusion_pyramids', 'solid_circle', or 'square' (got {self.face_type!r})"
             )
         self.auto_diameter = bool(data.get('auto_diameter', False))
         # outer_diameter may be None if auto_diameter is True
@@ -68,10 +68,12 @@ class TubeSettings:
         if diffusion_ridges_data is False or diffusion_ridges_data is None:
             self.diffusion_ridges = None
         elif isinstance(diffusion_ridges_data, dict):
+            ridge_height = float(diffusion_ridges_data.get('ridge_height', 0.5))
             self.diffusion_ridges = {
-                'ridge_height': float(diffusion_ridges_data.get('ridge_height', 0.5)),
+                'ridge_height': ridge_height,
                 'ridge_width': float(diffusion_ridges_data.get('ridge_width', 1.0)),
                 'ridge_spacing': float(diffusion_ridges_data.get('ridge_spacing', 0.0)),
+                'ridge_depth': float(diffusion_ridges_data.get('ridge_depth', ridge_height)),
             }
         else:
             # If it's True or some other truthy value, use defaults
@@ -79,6 +81,7 @@ class TubeSettings:
                 'ridge_height': 0.5,
                 'ridge_width': 1.0,
                 'ridge_spacing': 0.0,
+                'ridge_depth': 0.5,
             }
         
         self._led_strip_settings: Optional['LedStripSettings'] = None
@@ -237,6 +240,8 @@ class PreviewSettings:
         self.opacity = max(0.0, min(1.0, self.opacity))
         color_spec = data.get('color', '#b3b3b3')
         self._color_rgb = self._parse_color(color_spec)
+        background_spec = data.get('background', '#ffffff')
+        self._background_rgb = self._parse_color(background_spec)
 
     @staticmethod
     def _parse_color(spec: Any) -> tuple:

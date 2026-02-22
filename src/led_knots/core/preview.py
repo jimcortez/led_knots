@@ -185,7 +185,11 @@ def render_glb_to_image(
         raise ValueError(f"No meshes found in GLB: {glb_path}")
 
     # Keep ambient moderate so the model doesn’t blow out to white
-    scene = pyrender.Scene(ambient_light=[0.35, 0.35, 0.35])
+    bg_r, bg_g, bg_b = preview_config._background_rgb
+    scene = pyrender.Scene(
+        ambient_light=[0.35, 0.35, 0.35],
+        bg_color=[float(bg_r), float(bg_g), float(bg_b), 1.0],
+    )
     for pr_mesh, pose in mesh_poses:
         scene.add(pr_mesh, pose=pose)
 
@@ -236,19 +240,22 @@ def render_glb_to_image(
         renderer.delete()
 
     # Pyrender may return RGB or RGBA, and either uint8 (0-255) or float (0-1)
+    # Use configured background for transparent areas
+    bg_r, bg_g, bg_b = preview_config._background_rgb
     rgb = color_buf[:, :, :3]
     if color_buf.dtype == np.uint8:
         if color_buf.shape[2] >= 4:
             alpha = color_buf[:, :, 3:4].astype(np.float32) / 255.0
-            white = np.ones_like(rgb, dtype=np.float32) * 255
-            out_uint8 = (alpha * rgb + (1 - alpha) * white).clip(0, 255).astype(np.uint8)
+            bg_uint8 = np.array([int(bg_r * 255), int(bg_g * 255), int(bg_b * 255)], dtype=np.uint8)
+            bg_frame = np.ones_like(rgb, dtype=np.uint8) * bg_uint8
+            out_uint8 = (alpha * rgb + (1 - alpha) * bg_frame).clip(0, 255).astype(np.uint8)
         else:
             out_uint8 = rgb
     else:
         if color_buf.shape[2] >= 4:
             alpha = color_buf[:, :, 3:4]
-            white = np.ones_like(rgb)
-            out = (alpha * rgb + (1 - alpha) * white).clip(0, 1)
+            bg_frame = np.ones_like(rgb) * np.array([bg_r, bg_g, bg_b])
+            out = (alpha * rgb + (1 - alpha) * bg_frame).clip(0, 1)
         else:
             out = rgb.clip(0, 1)
         out_uint8 = (out * 255).astype(np.uint8)

@@ -5,7 +5,7 @@ output_bounds:
   height: 100
 
 tube_settings:
-  # Cross-section face type: led_circle (default), solid_circle, or square
+  # Cross-section face type: led_circle (default), led_circle_diffusion_pyramids, solid_circle, or square
   face_type: led_circle
   # Outer diameter of the tube in mm
   outer_diameter: 30
@@ -24,15 +24,17 @@ tube_settings:
   # Diffusion ridges on the oval surface; set to false to disable
   diffusion_ridges:
     ridge_height: 2.5  # mm
-    ridge_width: 2.0  # mm
+    ridge_width: 2.0  # mm (horizontal size)
     ridge_spacing: 1  # mm
+    ridge_depth: 2.5  # mm (peak height of pyramid along path)
+    # sections_per_pyramid: 3
 
 # Physical dimensions of the LED strip
 led_strip_settings:
   width: 10  # mm
   height: 1.8  # mm
   led_count: 60  # LEDs per meter
-  min_90_degtree_twist_distance: 70  # mm minimum distance for 90° twist
+  min_90_degtree_twist_distance: 5  # mm minimum distance for 90° twist
 
 server:
   # Directory for cached GLB objects
@@ -55,3 +57,4 @@ preview:
   light_elevation: 45  # Light direction elevation for shading
   color: '#b3b3b3'  # Model color (hex or name)
   opacity: 1.0  # Model opacity (0.0 = transparent, 1.0 = opaque)
+  background: '#1a1a2e'  # Preview image background (hex or name, e.g. white or black)
