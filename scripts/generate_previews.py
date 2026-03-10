@@ -20,13 +20,13 @@ from PIL import Image, ImageDraw, ImageFont
 # Knot module names (must be runnable as python -m led_knots.knots.<name>)
 KNOTS = [
     "rod",
-    # "twisted_rod",
+    "twisted_rod",
     "quarter_turn",
     "ring",
-    # "jog_bend",
-    # "jog_bend_3d",
-    # "helix",
-    # "figure_8",
+    "jog_bend",
+    "jog_bend_3d",
+    "helix",
+    "figure_8",
     # "sine_wave",
     # "trefoil"    
 ]

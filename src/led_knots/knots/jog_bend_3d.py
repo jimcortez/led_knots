@@ -15,66 +15,48 @@ Uses build_ribbon_aux_spine(path, config) to constrain twist from config
 """
 
 import logging
-from cadquery.func import spline, sweep
+
+from cadquery.func import spline
 
 from led_knots.core import (
+    draw_part,
     get_config,
-    render_part,
     build_ribbon_aux_spine,
-    create_led_circle_face,
 )
 
 logger = logging.getLogger(__name__)
 
+config = get_config(
+    name="Jog Bend 3D Knot",
+    description="Create and render a jog bend 3D knot",
+)
 
-def main():
-    """Generate and render the jog bend 3D knot."""
-    logging.basicConfig(level=logging.DEBUG)
-    config = get_config(name="Jog Bend 3D Knot", description="Create and render a jog bend 3D knot")
+# Use output bounds from config (path must fit; twist must fit min_90_degree_twist_distance or error is raised)
+width = config.output_bounds.width
+height = config.output_bounds.height
+spine_offset_radius = 5.0
 
-    # Use output bounds from config (path must fit; twist must fit min_90_degree_twist_distance or error is raised)
-    width = config.output_bounds.width
-    height = config.output_bounds.height
-    spine_offset_radius = 5.0
+# Create the sweep path from config bounds
+path = spline(
+    [
+        (0, 0, 0),
+        (width / 2, width / 2, height / 2),
+        (width, width, height),
+    ],
+    tgts=[
+        (0, 0, 1),
+        (0, 1, 0),
+        (0, 0, 1),
+    ],
+)
 
-    # Create the sweep path from config bounds
-    path = spline(
-        [
-            (0, 0, 0),
-            (width / 2, width / 2, height / 2),
-            (width, width, height),
-        ],
-        tgts=[
-            (0, 0, 1),
-            (0, 1, 0),
-            (0, 0, 1),
-        ],
-    )
+# Raises ValueError if twist cannot be achieved within min_90_degree_twist_distance
+aux_spine, initial_rotation = build_ribbon_aux_spine(
+    path,
+    config,
+    num_samples=40,
+    spine_offset_radius=spine_offset_radius,
+)
 
-    # Raises ValueError if twist cannot be achieved within min_90_degree_twist_distance
-    aux_spine, initial_rotation = build_ribbon_aux_spine(
-        path,
-        config,
-        num_samples=40,
-        spine_offset_radius=spine_offset_radius,
-    )
-
-    faces = create_led_circle_face(
-        **config.tube_settings.to_led_circle_face_kwargs(
-            orient_to_path=path,
-            rotation_z=initial_rotation,
-        )
-    )
-
-    result = sweep(faces, path, aux=aux_spine)
-    render_part(
-        result,
-        config,
-        path=path,
-        aux=aux_spine,
-        face_kwargs={"rotation_z": initial_rotation},
-    )
-
-
-if __name__ == "__main__":
-    main()
+# Create, sweep, and render the part (draw_part uses path + aux + rotation_z)
+draw_part(path, config, aux=aux_spine, rotation_z=initial_rotation)

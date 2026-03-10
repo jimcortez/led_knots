@@ -9,20 +9,23 @@ Uses build_ribbon_aux_spine(path, config) to constrain twist from config
 """
 
 import logging
-from cadquery.func import spline, sweep
+
+from cadquery.func import spline
 from pyknotid.make import trefoil as make_trefoil
 
 from led_knots.core import (
+    draw_part,
     get_config,
-    render_part,
     build_ribbon_aux_spine,
-    create_led_circle_face,
     scale_pyknot_points,
 )
 
 logger = logging.getLogger(__name__)
 
-config = get_config(name="Trefoil Knot", description="Create and render a trefoil knot")
+config = get_config(
+    name="Trefoil Knot",
+    description="Create and render a trefoil knot",
+)
 
 spine_offset_radius = 5.0
 
@@ -47,19 +50,6 @@ aux_spine, initial_rotation = build_ribbon_aux_spine(
     spine_offset_radius=spine_offset_radius,
 )
 
-faces = create_led_circle_face(
-    **config.tube_settings.to_led_circle_face_kwargs(
-        orient_to_path=path,
-        rotation_z=initial_rotation,
-    )
-)
-
-result = sweep(faces, path, aux=aux_spine)
-render_part(
-    result,
-    config,
-    path=path,
-    aux=aux_spine,
-    face_kwargs={"rotation_z": initial_rotation},
-)
+# Create, sweep, and render the part (draw_part uses path + aux + rotation_z)
+draw_part(path, config, aux=aux_spine, rotation_z=initial_rotation)
 
