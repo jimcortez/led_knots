@@ -284,6 +284,14 @@ def compute_optimal_twist_angles(
             proj_mag = np.linalg.norm(prev_local_x_proj)
             if proj_mag > 1e-6:
                 prev_local_x = prev_local_x_proj / proj_mag
+            else:
+                # Degeneracy: tangent nearly parallel to prev_local_x. Re-initialize frame
+                # so curvature/twist logic uses a valid perpendicular direction.
+                if abs(tangent[2]) < 0.9:
+                    ref = np.array([0, 0, 1])
+                else:
+                    ref = np.array([1, 0, 0])
+                prev_local_x = _normalize(np.cross(tangent, ref))
             prev_local_y = _normalize(np.cross(tangent, prev_local_x))
 
         # Skip twist computation if curvature is negligible
@@ -434,7 +442,16 @@ def build_variable_twist_spine(
 
             if proj_mag > 1e-6:
                 prev_local_x = prev_local_x_proj / proj_mag
-            # If projection is too small, keep previous (shouldn't happen for smooth paths)
+            else:
+                # Frame degeneracy: tangent is nearly parallel to prev_local_x (e.g. after
+                # a sharp bend or in high-curvature regions). Re-initialize with a stable
+                # reference to avoid a sudden jump when the projection becomes valid again;
+                # otherwise the aux spine gets a kink and the sweep orientation flips.
+                if abs(tangent[2]) < 0.9:
+                    ref = np.array([0, 0, 1])
+                else:
+                    ref = np.array([1, 0, 0])
+                prev_local_x = _normalize(np.cross(tangent, ref))
 
             prev_local_y = _normalize(np.cross(tangent, prev_local_x))
 

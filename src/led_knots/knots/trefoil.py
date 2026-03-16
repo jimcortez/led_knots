@@ -22,15 +22,13 @@ from led_knots.core import (
 
 logger = logging.getLogger(__name__)
 
-config = get_config(
-    name="Trefoil Knot",
-    description="Create and render a trefoil knot",
-)
+config = get_config(name="Trefoil Knot", description="Create and render a trefoil knot")
 
 spine_offset_radius = 5.0
 
-# Generate the trefoil knot path using pyknotid, scaled to config output bounds
-k = make_trefoil(num_points=100)
+# Generate the trefoil knot path using pyknotid, scaled to config output bounds.
+# More points give a smoother path; 150 balances smoothness and build time.
+k = make_trefoil(num_points=150)
 knot_coords = scale_pyknot_points(
     k.points,
     width=config.output_bounds.width,
@@ -42,14 +40,15 @@ knot_points = [(float(p[0]), float(p[1]), float(p[2])) for p in knot_coords]
 # Open path (closed path causes face overlap)
 path = spline(knot_points[:-1])
 
-# Raises ValueError if twist cannot be achieved within min_90_degree_twist_distance
+# Raises ValueError if twist cannot be achieved within min_90_degree_twist_distance.
+# Higher num_samples yields a smoother aux spine (150 balances smoothness and build time).
 aux_spine, initial_rotation = build_ribbon_aux_spine(
     path,
     config,
-    num_samples=100,
+    num_samples=150,
     spine_offset_radius=spine_offset_radius,
 )
 
-# Create, sweep, and render the part (draw_part uses path + aux + rotation_z)
+# Create, sweep, and render (draw_part supports --preview for image output)
 draw_part(path, config, aux=aux_spine, rotation_z=initial_rotation)
 
