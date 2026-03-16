@@ -19,6 +19,7 @@ classifiers = [
 dependencies = [
     "cadquery>=2.6.1",
     "matplotlib>=3.10.8",
+    "numba>=0.64.0",
     "numpy>=2.4.1",
     "numpy-stl>=3.2.0",
     "pillow>=11.0.0",
@@ -62,3 +63,12 @@ pyknotid = { git = "https://github.com/sashakolpakov/pyknotid.git" }
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+
+[dependency-groups]
+dev = [
+    "ipympl>=0.10.0",
+    "jupyter>=1.1.1",
+    "jupyter-rfb==0.4.1",
+    "pytest>=9.0.2",
+    "vispy>=0.16.1",
+]
