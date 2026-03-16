@@ -27,6 +27,15 @@ face_settings:
     rect_inner_y: 11.0      # mm – inner cavity Y (e.g. strip width + tolerance)
     oval_wall_thickness: 0.5   # mm – wall around oval cavity
     connector_width: 0.5       # mm – width of connectors to center oval
+    diffusion_ridges: false
+
+  led_circle_with_ridges:
+    outer_diameter: 30      # mm – tube outer diameter
+    wall_thickness: 1.0     # mm – outer ring wall thickness
+    rect_inner_x: 4.6       # mm – inner cavity X (e.g. strip height×2 + tolerance)
+    rect_inner_y: 11.0      # mm – inner cavity Y (e.g. strip width + tolerance)
+    oval_wall_thickness: 0.5   # mm – wall around oval cavity
+    connector_width: 0.5       # mm – width of connectors to center oval
     diffusion_ridges:
       ridge_height: 2.5    # mm
       ridge_width: 2.0     # mm – horizontal size
@@ -76,12 +85,33 @@ export:
   stl_ascii: true           # true = ASCII STL, false = binary
 
 # -----------------------------------------------------------------------------
-# Preview (STL → image)
+# Mesh export (simulation-focused OBJ output)
+# -----------------------------------------------------------------------------
+mesh:
+  # Optional unit scaling for mesh export. If true, convert dimensions
+  # from millimeters (CadQuery default) to meters
+  unit_scale_mm_to_m: true
+
+  # Optional maximum triangle count for mesh decimation. If null or
+  # omitted, no automatic decimation is applied. When set, trimesh will
+  # attempt to simplify the mesh to approximately this many faces.
+  target_face_count: null
+
+  # Require watertight (closed) meshes for export. If true and the
+  # generated mesh is not watertight, mesh export will fail with a
+  # clear error instead of writing a partial mesh.
+  watertight_required: false
+
+# -----------------------------------------------------------------------------
+# Preview (mesh → image; finer tessellation for smooth tube appearance)
 # -----------------------------------------------------------------------------
 preview:
   stl_cache: cache/preview   # directory path
+  # Tessellation for preview mesh (smaller = smoother; used when generating preview image)
+  mesh_tolerance: 0.0005     # linear (mm); finer than export for smooth tube
+  mesh_angular_tolerance: 0.04 # rad
   image_width: 800           # px
-  image_height: 600          # px
+  image_height: 600         # px
   dpi: 100                   # dots per inch
   elevation: 30              # deg – 3D view elevation
   azimuth: 45                # deg – 3D view azimuth
