@@ -28,7 +28,8 @@ KNOTS = [
     "helix",
     "figure_8",
     # "sine_wave",
-    "trefoil"    
+    "trefoil",
+    "k4_1"    
 ]
 
 # Duration per frame in the combined GIF (milliseconds)

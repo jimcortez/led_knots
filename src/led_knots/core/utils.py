@@ -106,18 +106,29 @@ def parse_args(description: str = "Create and render a knot model"):
 # PYKNOT SCALING UTILITIES
 # ============================================================================
 
-def scale_pyknot_points(points: np.ndarray, width: float, height: float, length: float) -> np.ndarray:
+def scale_pyknot_points(
+    points: np.ndarray,
+    width: float,
+    height: float,
+    length: float,
+    padding: Union[float, Tuple[float, float, float]] = 0.0,
+) -> np.ndarray:
     """
     Scale pyknot points to fit within a bounding box while preserving aspect ratio.
     
     Calculates the bounding box of the input points and scales them uniformly
-    to fit within the specified width, height, and length constraints.
+    to fit within the specified width, height, and length constraints,
+    optionally applying padding on each dimension before scaling.
     
     Args:
         points: numpy array of shape (n, 3) containing (x, y, z) coordinates
         width: Target width for the x dimension (mm)
         height: Target height for the y dimension (mm)
         length: Target length for the z dimension (mm)
+        padding: Optional padding to subtract from (width, height, length).
+                 If a single float, the same padding is applied to all three
+                 dimensions. If a tuple of three numbers, interpreted as
+                 (width_padding, height_padding, length_padding).
         
     Returns:
         numpy array of scaled points with the same shape as input
@@ -132,10 +143,21 @@ def scale_pyknot_points(points: np.ndarray, width: float, height: float, length:
     span_y = max_y - min_y
     span_z = max_z - min_z
     
-    # Calculate scale factors to fit within width (x), height (y), and length (z)
-    scale_x = width / span_x if span_x > 0 else 1.0
-    scale_y = height / span_y if span_y > 0 else 1.0
-    scale_z = length / span_z if span_z > 0 else 1.0
+    # Normalize padding to per-dimension values
+    if isinstance(padding, (tuple, list)) and len(padding) == 3:
+        pad_w, pad_h, pad_l = padding
+    else:
+        pad_w = pad_h = pad_l = float(padding)
+
+    effective_width = width - pad_w
+    effective_height = height - pad_h
+    effective_length = length - pad_l
+
+    # Calculate scale factors to fit within effective width (x), height (y),
+    # and length (z), after padding
+    scale_x = effective_width / span_x if span_x > 0 else 1.0
+    scale_y = effective_height / span_y if span_y > 0 else 1.0
+    scale_z = effective_length / span_z if span_z > 0 else 1.0
     
     # Use the minimum scale factor to preserve aspect ratio and ensure it fits
     scale_factor = min(scale_x, scale_y, scale_z)
