@@ -24,6 +24,7 @@ import numpy as np
 
 import cadquery as cq
 from cadquery.func import Plane, Location, sweep
+import trimesh
 from .cache_utils import cache_key_for_part, cache_path_for_part, preview_stl_path_for_part
 from .led_circle import (
     _pyramid_ridge_height_at_t,
@@ -85,6 +86,12 @@ def parse_args(description: str = "Create and render a knot model"):
         type=str,
         metavar='FILEPATH',
         help='Generate a preview image for the model and save to the specified file path'
+    )
+    parser.add_argument(
+        '--output-mesh',
+        type=str,
+        metavar='FILEPATH',
+        help='Export a simulation-focused mesh (currently OBJ only) using trimesh'
     )
     args = parser.parse_args()
     
@@ -178,9 +185,73 @@ def render_part(
     # Import yacv_server (server will auto-start unless disabled)
     from yacv_server import yacv, show
 
+    def _maybe_export_mesh_from_glb(glb_bytes: bytes) -> None:
+        """Export an OBJ mesh from GLB bytes when --output-mesh is set."""
+        mesh_cfg = getattr(config, "mesh", None)
+        output_path = getattr(mesh_cfg, "filepath", None) if mesh_cfg else None
+        if not output_path:
+            return
+
+        ext = os.path.splitext(output_path)[1].lower()
+        if ext != ".obj":
+            logger.error("Mesh export only supports .obj for now (got %s).", ext)
+            sys.exit(2)
+
+        try:
+            scene_or_mesh = trimesh.load(trimesh.util.wrap_as_stream(glb_bytes), file_type="glb")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error("Failed to load GLB for mesh export: %r", exc)
+            sys.exit(2)
+
+        if isinstance(scene_or_mesh, trimesh.Scene):
+            mesh = scene_or_mesh.dump(concatenate=True)
+        else:
+            mesh = scene_or_mesh
+
+        mesh_cfg = config.mesh
+
+        # Unit scaling mm -> m when requested.
+        if mesh_cfg.unit_scale_mm_to_m:
+            mesh.apply_scale(0.001)
+
+        # Basic cleanup for robustness (API varies slightly by version).
+        if hasattr(mesh, "remove_degenerate_faces"):
+            mesh.remove_degenerate_faces()
+        if hasattr(mesh, "remove_unreferenced_vertices"):
+            mesh.remove_unreferenced_vertices()
+        if hasattr(mesh, "merge_vertices"):
+            mesh.merge_vertices()
+
+        # Watertightness check.
+        if mesh_cfg.watertight_required and not mesh.is_watertight:
+            logger.error("Mesh export aborted: generated mesh is not watertight.")
+            sys.exit(2)
+
+        # Optional decimation.
+        if mesh_cfg.target_face_count is not None:
+            current_faces = len(mesh.faces)
+            target = mesh_cfg.target_face_count
+            if current_faces > target and target > 0:
+                try:
+                    mesh = mesh.simplify_quadratic_decimation(target)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.warning("Mesh decimation failed (%r); continuing with original mesh.", exc)
+
+        export_dir = os.path.dirname(output_path)
+        if export_dir and not os.path.exists(export_dir):
+            os.makedirs(export_dir, exist_ok=True)
+
+        try:
+            mesh.export(output_path, file_type="obj")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error("Failed to export OBJ mesh to %s: %r", output_path, exc)
+            sys.exit(2)
+
+        logger.info("Exported mesh OBJ to %s", output_path)
+
     if is_glb_bytes:
         glb_bytes = part
-        # Pre-built GLB from cache: show and/or write to export path
+        # Pre-built GLB from cache: show and/or write to export path and mesh.
         if config.export.filepath:
             file_ext = os.path.splitext(config.export.filepath)[1].lower()
             if file_ext in ['.glb', '.gltf']:
@@ -190,11 +261,14 @@ def render_part(
                 with open(config.export.filepath, 'wb') as f:
                     f.write(glb_bytes)
                 logger.info("Exported %s to %s (GLB format)", name, config.export.filepath)
+                _maybe_export_mesh_from_glb(glb_bytes)
                 return
             # Other formats not supported when part is from cache
             logger.error("Export format %s not supported when using cached GLB", file_ext)
             sys.exit(2)
         show(glb_bytes, names=name)
+        # Mesh export from cached GLB when viewing from cache.
+        _maybe_export_mesh_from_glb(glb_bytes)
         if config.server:
             if yacv.server_thread is None:
                 yacv.start()
@@ -308,6 +382,8 @@ def render_part(
                         Path(preview_image_path),
                         config.preview_settings,
                     )
+            # Mesh export from freshly generated GLB.
+            _maybe_export_mesh_from_glb(glb_data)
             return
 
         logger.error(
@@ -318,7 +394,13 @@ def render_part(
 
     # Display path (no export): show solid, optionally write GLB to cache
     show(solid, names=name)
-    if cache_path is not None and not getattr(config, 'no_cache', False):
+    # For display flows, we may still want a GLB even when --no-cache is set
+    # so that mesh export has something to convert. We always respect --no-cache
+    # for reuse across runs, but for the current invocation we can generate and
+    # write a GLB when either caching is enabled or a mesh export is requested.
+    want_glb_for_cache = cache_path is not None and not getattr(config, 'no_cache', False)
+    want_glb_for_mesh = getattr(getattr(config, "mesh", None), "filepath", None) is not None
+    if cache_path is not None and (want_glb_for_cache or want_glb_for_mesh):
         export_data = yacv.export(name)
         if export_data is not None:
             glb_data, _ = export_data
@@ -327,6 +409,9 @@ def render_part(
             with open(cache_path, 'wb') as f:
                 f.write(glb_data)
             logger.debug("Wrote cache %s", cache_path)
+            # If this run requested a mesh, convert from the freshly written GLB.
+            if want_glb_for_mesh:
+                _maybe_export_mesh_from_glb(glb_data)
 
     if config.server:
         if yacv.server_thread is None:
@@ -501,11 +586,37 @@ def draw_part(path, config, aux=None, **face_kwargs):
     else:
         raise ValueError(f"Unknown face_type: {face_type!r}")
 
-    # Preview-only (no export): write GLB to cache, render image from GLB, exit without viewer
+    # Preview-only (no export): tessellate with fine tolerance for smooth tube, render image
     if preview_filepath and not config.export.filepath:
-        os.environ['YACV_DISABLE_SERVER'] = '1'
         solid = result.val() if hasattr(result, 'val') else result
+        tol = config.preview_settings.mesh_tolerance
+        ang_tol = config.preview_settings.mesh_angular_tolerance
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".stl", delete=False) as tf:
+            tmp_stl = tf.name
+        try:
+            cq.exporters.export(
+                solid,
+                tmp_stl,
+                tolerance=tol,
+                angularTolerance=ang_tol,
+                opt={"ascii": False},
+            )
+            render_stl_to_image(
+                Path(tmp_stl),
+                Path(preview_filepath),
+                config.preview_settings,
+            )
+            logger.debug("Wrote preview image %s (mesh tolerance=%.2e)", preview_filepath, tol)
+        finally:
+            if os.path.exists(tmp_stl):
+                try:
+                    os.unlink(tmp_stl)
+                except OSError:
+                    pass
+        # Optionally write GLB to cache for other uses (e.g. viewer)
         if cache_path is not None:
+            os.environ['YACV_DISABLE_SERVER'] = '1'
             from yacv_server import yacv, show
             show(solid, names=config.name or "Knot")
             export_data = yacv.export(config.name or "Knot")
@@ -515,16 +626,7 @@ def draw_part(path, config, aux=None, **face_kwargs):
                 cache_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(cache_path, 'wb') as f:
                     f.write(glb_data)
-                logger.debug("Wrote cache %s for preview", cache_path)
-                render_glb_to_image(
-                    cache_path,
-                    Path(preview_filepath),
-                    config.preview_settings,
-                )
-            else:
-                logger.warning("Could not export GLB for preview; skipping preview image.")
-        else:
-            logger.warning("No cache path for preview; skipping preview image.")
+                logger.debug("Wrote cache %s", cache_path)
         return result
 
     # Export (with optional preview): render_part exports and optionally generates preview image

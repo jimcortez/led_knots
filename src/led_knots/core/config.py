@@ -213,11 +213,14 @@ class ExportSettings:
 
 
 class PreviewSettings:
-    """Preview image settings (STL to image via numpy-stl + matplotlib)."""
+    """Preview image settings (mesh to image; fine tessellation for smooth tubes)."""
 
     def __init__(self, data: Dict[str, Any], project_root: Path):
         stl_cache = str(data.get('stl_cache', 'cache/preview'))
         self.preview_cache_dir = project_root / stl_cache
+        # Tessellation for preview mesh (smaller = smoother)
+        self.mesh_tolerance = float(data.get('mesh_tolerance', 0.0005))
+        self.mesh_angular_tolerance = float(data.get('mesh_angular_tolerance', 0.04))
         self.image_width = int(data.get('image_width', 800))
         self.image_height = int(data.get('image_height', 600))
         self.dpi = int(data.get('dpi', 100))
@@ -242,6 +245,27 @@ class PreviewSettings:
         s = str(spec).strip()
         rgb = mcolors.to_rgb(s)
         return (float(rgb[0]), float(rgb[1]), float(rgb[2]))
+
+
+class MeshSettings:
+    """Mesh export configuration for simulation-focused OBJ output."""
+
+    def __init__(self, data: Dict[str, Any], filepath: Optional[str] = None):
+        # Target output mesh path from the command line (--output-mesh).
+        self.filepath: Optional[str] = filepath
+
+        # Unit scaling: when true, convert from millimeters (CadQuery default)
+        # to meters (used by Genesis and many physics engines).
+        self.unit_scale_mm_to_m: bool = bool(data.get("unit_scale_mm_to_m", True))
+
+        # Optional decimation target: maximum number of faces to aim for.
+        # When None, no automatic decimation is performed.
+        tfc = data.get("target_face_count", None)
+        self.target_face_count: Optional[int] = int(tfc) if tfc is not None else None
+
+        # Require watertight meshes for export. If true and the generated mesh
+        # is not watertight, mesh export will fail with a clear error.
+        self.watertight_required: bool = bool(data.get("watertight_required", True))
 
 
 class Config:
@@ -288,6 +312,9 @@ class Config:
         
         # Initialize export settings with command line filepath
         self.export = ExportSettings(config_data.get('export', {}), filepath=args.export)
+
+        # Mesh export settings (simulation-focused OBJ output).
+        self.mesh = MeshSettings(config_data.get("mesh", {}), filepath=getattr(args, "output_mesh", None))
 
         # Preview settings (STL cache dir, image size, view angles)
         preview_data = config_data.get('preview', {})

@@ -79,6 +79,7 @@ All knot commands accept the same options:
 | Option | Description |
 |--------|-------------|
 | `--export FILEPATH` | Export the model to a file. Supported formats: `.stl`, `.step`, `.stp`, `.3mf`, `.glb`, `.gltf` |
+| `--output-mesh FILEPATH` | Export a simulation-focused mesh using trimesh. Currently only `.obj` is supported and is tuned for physics engines like Genesis (meters, watertightness, optional decimation). |
 | `--server` | Start the yacv web server and open the model in your browser |
 | `-v`, `--verbose` | Enable debug-level logging |
 | `--no-cache` | Always rebuild the 3D model from the path; never use or update the GLB cache |
@@ -201,6 +202,30 @@ face_settings:
 ```
 
 All knot modules automatically use these configuration values, making it easy to adjust model dimensions and tube parameters across all knot types.
+
+#### Mesh export settings
+
+The **mesh** section in `config.yaml` controls how simulation-focused meshes (for example, OBJ files for Genesis) are generated:
+
+```yaml
+mesh:
+  # Optional unit scaling for mesh export. If true, convert dimensions
+  # from millimeters (CadQuery default) to meters (Genesis and many
+  # physics engines use meters).
+  unit_scale_mm_to_m: true
+
+  # Optional maximum triangle count for mesh decimation. If null or
+  # omitted, no automatic decimation is applied. When set, trimesh will
+  # attempt to simplify the mesh to approximately this many faces.
+  target_face_count: null
+
+  # Require watertight (closed) meshes for export. If true and the
+  # generated mesh is not watertight, mesh export will fail with a
+  # clear error instead of writing a partial mesh.
+  watertight_required: true
+```
+
+When you supply `--output-mesh path/to/model.obj`, the library will reuse the internal GLB representation whenever possible and convert it to OBJ using trimesh, applying these settings.
 
 ## LED Cross-Section Design
 
