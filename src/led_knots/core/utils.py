@@ -112,6 +112,7 @@ def scale_pyknot_points(
     height: float,
     length: float,
     padding: Union[float, Tuple[float, float, float]] = 0.0,
+    preserve_aspect_ratio: bool = True,
 ) -> np.ndarray:
     """
     Scale pyknot points to fit within a bounding box while preserving aspect ratio.
@@ -129,6 +130,9 @@ def scale_pyknot_points(
                  If a single float, the same padding is applied to all three
                  dimensions. If a tuple of three numbers, interpreted as
                  (width_padding, height_padding, length_padding).
+        preserve_aspect_ratio: When True (default), uses a uniform scale factor
+            so the knot preserves its proportions. When False, scales each axis
+            independently to fill the (padded) bounding box.
         
     Returns:
         numpy array of scaled points with the same shape as input
@@ -158,12 +162,15 @@ def scale_pyknot_points(
     scale_x = effective_width / span_x if span_x > 0 else 1.0
     scale_y = effective_height / span_y if span_y > 0 else 1.0
     scale_z = effective_length / span_z if span_z > 0 else 1.0
-    
-    # Use the minimum scale factor to preserve aspect ratio and ensure it fits
-    scale_factor = min(scale_x, scale_y, scale_z)
 
-    # Scale the points
-    scaled = points * scale_factor
+    if preserve_aspect_ratio:
+        # Use the minimum scale factor to preserve aspect ratio and ensure it fits
+        scale_factor = min(scale_x, scale_y, scale_z)
+        scaled = points * scale_factor
+    else:
+        # Scale each axis independently to fill the (padded) bounding box
+        scales = np.array([scale_x, scale_y, scale_z], dtype=float)
+        scaled = points * scales
 
     # Translate so that the scaled points lie entirely in the positive octant
     # (i.e. the minimum x, y, z coordinates are at 0).

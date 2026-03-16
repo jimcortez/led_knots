@@ -34,6 +34,8 @@ knot_coords = scale_pyknot_points(
     width=config.output_bounds.width,
     height=config.output_bounds.width,
     length=config.output_bounds.height,
+    padding=config.tube_settings.outer_radius,
+    preserve_aspect_ratio=False,
 )
 knot_points = [(float(p[0]), float(p[1]), float(p[2])) for p in knot_coords]
 

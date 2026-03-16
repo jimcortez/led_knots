@@ -29,7 +29,8 @@ KNOTS = [
     "figure_8",
     # "sine_wave",
     "trefoil",
-    "k4_1"    
+    "k4_1",
+    "stevedore",
 ]
 
 # Duration per frame in the combined GIF (milliseconds)

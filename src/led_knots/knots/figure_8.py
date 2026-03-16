@@ -20,20 +20,7 @@ config = get_config(
     description="Create and render a figure 8 knot"
 )
 
-# Generate the torus knot path using pyknotid
-# k = torus_knot(num=150).points
-
-# k = periodic_knot.p4_4__1()
-
 k = torus_knot(p=5, q=10, num=150).points
-
-# k = k8_21()
-# k.plot(mode='matplotlib')
-
-# canvas = app.Canvas(keys='interactive')
-# plot_line_vispy(k.points).show()
-
-
 
 # Scale the knot coordinates to fit within the bounding box
 # Using width for x, width for y, and height for z (length)
@@ -41,7 +28,9 @@ knot_coords = scale_pyknot_points(
     k,
     width=config.output_bounds.width,
     height=config.output_bounds.width,
-    length=config.output_bounds.height
+    length=config.output_bounds.height,
+    padding=config.tube_settings.outer_radius,
+    preserve_aspect_ratio=False,
 )
 
 # Convert numpy array to list of 3D points for CadQuery
