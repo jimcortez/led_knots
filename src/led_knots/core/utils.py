@@ -139,9 +139,16 @@ def scale_pyknot_points(points: np.ndarray, width: float, height: float, length:
     
     # Use the minimum scale factor to preserve aspect ratio and ensure it fits
     scale_factor = min(scale_x, scale_y, scale_z)
-    
+
     # Scale the points
-    return points * scale_factor
+    scaled = points * scale_factor
+
+    # Translate so that the scaled points lie entirely in the positive octant
+    # (i.e. the minimum x, y, z coordinates are at 0).
+    min_scaled = scaled.min(axis=0)
+    translated = scaled - min_scaled
+
+    return translated
 
 
 # ============================================================================
