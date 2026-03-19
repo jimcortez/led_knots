@@ -72,6 +72,34 @@ path:
   min_90_degree_twist_distance: 5   # mm – minimum path length for 90° twist
 
 # -----------------------------------------------------------------------------
+# Tube gap (open segment) + clamp settings
+# -----------------------------------------------------------------------------
+tube_gap:
+  enabled: false
+  gap_length_mm: 25.0        # mm – arc-length gap in the sweep path
+  center_fraction: 0.0       # [-0.5, 0.5] – 0.0 centered along the path
+
+clamp:
+  enabled: true
+  clearance_diameter_mm: 1.0  # mm – clamp ID = tube OD + clearance
+  length_mm: 18.0             # mm – axial length of the clamp
+  wall_thickness_mm: 2.5      # mm – clamp wall thickness outside the tube
+  lap_depth_mm: 1.0           # mm – how far lap joint steps into wall
+  lap_step_height_mm: 1.5     # mm – radial step height for the seam rabbet
+  lap_clearance_mm: 0.2       # mm – extra clearance so halves assemble easily
+  wire_hole_diameter_mm: 4.0  # mm – through-hole for wires on one half
+  wire_ring_height_mm: 4.0    # mm – ring height above surface
+  wire_ring_top_thickness_mm: 1.0   # mm – ring wall thickness at the top
+  wire_ring_base_thickness_mm: 2.0  # mm – ring wall thickness at the base (tapers up)
+  adhesive_gap_mm: 0.10       # mm – explicit glue line thickness
+  reg_lip_height_mm: 0.8      # mm – tongue height (radial)
+  reg_lip_width_mm: 1.2       # mm – tongue width (across seam normal)
+  reg_clearance_mm: 0.08      # mm – clearance between tongue and groove (resin-friendly)
+  relief_enabled: true
+  relief_depth_mm: 0.3        # mm – escape pocket depth (radial)
+  relief_width_mm: 0.5        # mm – escape pocket width (across seam normal)
+
+# -----------------------------------------------------------------------------
 # Server (cache, optional yacv overrides)
 # -----------------------------------------------------------------------------
 server:

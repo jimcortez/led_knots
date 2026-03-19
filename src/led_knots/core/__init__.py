@@ -12,6 +12,8 @@ from .utils import (
     parse_args,
     render_part,
     draw_part,
+    build_tube_from_path,
+    maybe_export_named_parts,
     scale_pyknot_points,
 )
 from .path_utils import (
@@ -37,6 +39,8 @@ __all__ = [
     'parse_args',
     'render_part',
     'draw_part',
+    'build_tube_from_path',
+    'maybe_export_named_parts',
     'scale_pyknot_points',
     'sample_path_curvature',
     'sample_path_for_profiles',

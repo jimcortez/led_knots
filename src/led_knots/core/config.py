@@ -84,6 +84,81 @@ class PathSettings:
             )
 
 
+class TubeGapSettings:
+    """Optional gap settings to open the tube for wire/LED insertion."""
+
+    def __init__(self, data: Dict[str, Any]):
+        data = data or {}
+        self.enabled: bool = bool(data.get("enabled", False))
+        self.gap_length_mm: float = float(data.get("gap_length_mm", 0.0))
+        # In [-0.5, 0.5]; 0.0 = centered along point polyline length.
+        self.center_fraction: float = float(data.get("center_fraction", 0.0))
+        if self.gap_length_mm < 0:
+            raise ValueError("tube_gap.gap_length_mm must be >= 0 (got %s)" % self.gap_length_mm)
+        if not (-0.5 <= self.center_fraction <= 0.5):
+            raise ValueError("tube_gap.center_fraction must be in [-0.5, 0.5] (got %s)" % self.center_fraction)
+
+
+class ClampSettings:
+    """Settings for the 2-part tube clamp used to close the gap."""
+
+    def __init__(self, data: Dict[str, Any]):
+        data = data or {}
+        self.enabled: bool = bool(data.get("enabled", True))
+
+        # Clearance on diameter (mm): clamp ID = tube OD + clearance_diameter_mm
+        self.clearance_diameter_mm: float = float(data.get("clearance_diameter_mm", 1.0))
+        self.length_mm: float = float(data.get("length_mm", 18.0))
+        self.wall_thickness_mm: float = float(data.get("wall_thickness_mm", 2.5))
+
+        # Lap joint dimensions along the seam for gluing/alignment.
+        self.lap_depth_mm: float = float(data.get("lap_depth_mm", 1.0))
+        # For the seam step: radial step height into the wall thickness.
+        self.lap_step_height_mm: float = float(data.get("lap_step_height_mm", 1.5))
+        self.lap_clearance_mm: float = float(data.get("lap_clearance_mm", 0.2))
+
+        # Wire feed hole + ring.
+        self.wire_hole_diameter_mm: float = float(data.get("wire_hole_diameter_mm", 4.0))
+        self.wire_ring_height_mm: float = float(data.get("wire_ring_height_mm", 4.0))
+        self.wire_ring_top_thickness_mm: float = float(data.get("wire_ring_top_thickness_mm", 1.0))
+        self.wire_ring_base_thickness_mm: float = float(data.get("wire_ring_base_thickness_mm", 2.0))
+
+        # Adhesive / joint tolerances.
+        self.adhesive_gap_mm: float = float(data.get("adhesive_gap_mm", 0.10))
+
+        # Registration: circular lip + groove along the seam.
+        self.reg_lip_height_mm: float = float(data.get("reg_lip_height_mm", 0.8))
+        self.reg_lip_width_mm: float = float(data.get("reg_lip_width_mm", 1.2))
+        self.reg_clearance_mm: float = float(data.get("reg_clearance_mm", 0.08))
+
+        # Adhesive relief features (escape pockets).
+        self.relief_enabled: bool = bool(data.get("relief_enabled", True))
+        self.relief_depth_mm: float = float(data.get("relief_depth_mm", 0.3))
+        self.relief_width_mm: float = float(data.get("relief_width_mm", 0.5))
+
+        for k in (
+            "clearance_diameter_mm",
+            "length_mm",
+            "wall_thickness_mm",
+            "lap_depth_mm",
+            "lap_step_height_mm",
+            "wire_hole_diameter_mm",
+            "wire_ring_height_mm",
+            "wire_ring_top_thickness_mm",
+            "wire_ring_base_thickness_mm",
+            "reg_lip_height_mm",
+            "reg_lip_width_mm",
+            "relief_depth_mm",
+            "relief_width_mm",
+        ):
+            if getattr(self, k) <= 0:
+                raise ValueError(f"clamp.{k} must be > 0 (got {getattr(self, k)})")
+
+        for k in ("adhesive_gap_mm", "reg_clearance_mm"):
+            if getattr(self, k) < 0:
+                raise ValueError(f"clamp.{k} must be >= 0 (got {getattr(self, k)})")
+
+
 class TubeSettings:
     """Active face configuration built from resolved face_settings for the selected face_type."""
 
@@ -300,6 +375,8 @@ class Config:
         face_data = resolve_face_settings(face_settings_raw, face_type)
         self.tube_settings = TubeSettings(face_type, face_data)
         self.path_settings = PathSettings(config_data.get('path', {}))
+        self.tube_gap = TubeGapSettings(config_data.get("tube_gap", {}))
+        self.clamp = ClampSettings(config_data.get("clamp", {}))
         
         # Parse command line arguments
         args = parse_args(description=description or "Create and render a knot model")
@@ -327,6 +404,9 @@ class Config:
         self.no_cache = args.no_cache
         self.only_cache = args.only_cache
         self.preview_filepath = args.preview
+        # Optional multi-part export (e.g., assembly vs individual parts)
+        self.export_parts = getattr(args, "export_parts", None)
+        self.export_parts_dir = getattr(args, "export_parts_dir", None)
         self.name = name  # Name of the part (used for export/display)
     
     @staticmethod

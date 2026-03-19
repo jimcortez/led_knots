@@ -9,7 +9,7 @@ import logging
 from cadquery.func import circle
 from cadquery.occ_impl.shapes import spline
 from pyknotid.spacecurves import Knot
-from led_knots.core import build_ribbon_aux_spine, draw_part, get_config, scale_pyknot_points
+from led_knots.core import draw_part, get_config, scale_pyknot_points
 from pyknotid.make import unknot
 import numpy as np
 

@@ -93,6 +93,22 @@ def parse_args(description: str = "Create and render a knot model"):
         metavar='FILEPATH',
         help='Export a simulation-focused mesh (currently OBJ only) using trimesh'
     )
+    parser.add_argument(
+        '--export-parts',
+        type=str,
+        metavar='PARTS',
+        help=(
+            "Optional multi-part export selector (comma-separated). "
+            "Supported tokens: assembly,tube,clamp_a,clamp_b,clamp_halves,all. "
+            "Only applies to knots that build an assembly."
+        ),
+    )
+    parser.add_argument(
+        '--export-parts-dir',
+        type=str,
+        metavar='DIR',
+        help="Directory to write per-part exports when --export-parts is used.",
+    )
     args = parser.parse_args()
     
     # Configure logging if verbose flag is set
@@ -285,6 +301,36 @@ def render_part(
 
         logger.info("Exported mesh OBJ to %s", output_path)
 
+    # ------------------------------------------------------------------------
+    # Assembly support
+    # ------------------------------------------------------------------------
+    # We treat assemblies as first-class export targets (STEP/GLB hierarchy),
+    # while still supporting single-solid exports for STL/3MF and legacy flows.
+    is_assembly = isinstance(part, cq.Assembly)
+
+    def _assembly_to_glb_bytes(assy: cq.Assembly) -> bytes:
+        """Export assembly to GLB bytes (tempfile-backed)."""
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".glb", delete=False) as tf:
+            tmp_path = tf.name
+        try:
+            # Use preview tessellation for smoothness when viewing/caching.
+            tol = getattr(config, "preview_settings", None)
+            tol_val = getattr(tol, "mesh_tolerance", None)
+            ang_val = getattr(tol, "mesh_angular_tolerance", None)
+            if tol_val is None:
+                tol_val = config.export.tolerance
+            if ang_val is None:
+                ang_val = config.export.angular_tolerance
+            assy.export(tmp_path, exportType="GLB", tolerance=float(tol_val), angularTolerance=float(ang_val))
+            with open(tmp_path, "rb") as f:
+                return f.read()
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
     if is_glb_bytes:
         glb_bytes = part
         # Pre-built GLB from cache: show and/or write to export path and mesh.
@@ -305,6 +351,112 @@ def render_part(
         show(glb_bytes, names=name)
         # Mesh export from cached GLB when viewing from cache.
         _maybe_export_mesh_from_glb(glb_bytes)
+        if config.server:
+            if yacv.server_thread is None:
+                yacv.start()
+            logger.info("Server started. View %s in the web interface.", name)
+            if yacv.server is not None:
+                logger.info("Server URL: http://%s:%s", yacv.server.server_name, yacv.server.server_port)
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("Shutting down server...")
+                yacv.stop()
+        return
+
+    # ------------------------------------------------------------------------
+    # Export / show for Assembly (non-bytes)
+    # ------------------------------------------------------------------------
+    if is_assembly:
+        assy: cq.Assembly = part
+        if config.export.filepath:
+            export_dir = os.path.dirname(config.export.filepath)
+            if export_dir and not os.path.exists(export_dir):
+                os.makedirs(export_dir, exist_ok=True)
+            file_ext = os.path.splitext(config.export.filepath)[1].lower()
+
+            # STEP preserves part hierarchy.
+            if file_ext in [".step", ".stp"]:
+                assy.export(
+                    config.export.filepath,
+                    exportType="STEP",
+                    mode="default",
+                    write_pcurves=True,
+                    precision_mode=0,
+                )
+                logger.info("Exported %s to %s (STEP assembly)", name, config.export.filepath)
+                return
+
+            # GLB/GLTF exports full assembly.
+            if file_ext in [".glb", ".gltf"]:
+                assy.export(
+                    config.export.filepath,
+                    exportType="GLB" if file_ext == ".glb" else "GLTF",
+                    tolerance=config.export.tolerance,
+                    angularTolerance=config.export.angular_tolerance,
+                )
+                logger.info("Exported %s to %s (GLTF/GLB assembly)", name, config.export.filepath)
+                # Optionally cache the same bytes for fast preview flows.
+                if cache_path is not None and not getattr(config, "no_cache", False) and file_ext == ".glb":
+                    try:
+                        cache_path_w = Path(cache_path) if not isinstance(cache_path, Path) else cache_path
+                        cache_path_w.parent.mkdir(parents=True, exist_ok=True)
+                        with open(config.export.filepath, "rb") as f:
+                            glb_data = f.read()
+                        with open(cache_path_w, "wb") as f:
+                            f.write(glb_data)
+                        logger.debug("Wrote cache %s", cache_path_w)
+                    except Exception:
+                        pass
+                return
+
+            # STL/3MF: export fused compound of assembly.
+            if file_ext in [".stl", ".3mf"]:
+                solid = assy.toCompound()
+                cq.exporters.export(
+                    solid,
+                    config.export.filepath,
+                    tolerance=config.export.tolerance,
+                    angularTolerance=config.export.angular_tolerance,
+                    opt={"ascii": config.export.stl_ascii} if file_ext == ".stl" else None,
+                )
+                logger.info("Exported %s to %s (%s fused)", name, config.export.filepath, file_ext.upper().lstrip("."))
+                return
+
+            logger.error(
+                "Unknown export file extension '%s' for assembly. Supported: .step, .stp, .stl, .3mf, .glb, .gltf.",
+                file_ext,
+            )
+            sys.exit(2)
+
+        # No export path: show a fused Compound so yacv reliably displays all parts.
+        # (Assemblies exported to GLB directly can be viewer-dependent.)
+        compound = assy.toCompound()
+        show(compound, names=name)
+
+        # Optionally write GLB bytes to cache and/or convert to mesh, using yacv export.
+        want_glb_for_cache = cache_path is not None and not getattr(config, "no_cache", False)
+        want_glb_for_mesh = getattr(getattr(config, "mesh", None), "filepath", None) is not None
+        want_glb_for_preview = preview_image_path is not None
+        if cache_path is not None and (want_glb_for_cache or want_glb_for_mesh or want_glb_for_preview):
+            export_data = yacv.export(name)
+            if export_data is not None:
+                glb_data, _ = export_data
+                cache_path_w = Path(cache_path) if not isinstance(cache_path, Path) else cache_path
+                cache_path_w.parent.mkdir(parents=True, exist_ok=True)
+                with open(cache_path_w, "wb") as f:
+                    f.write(glb_data)
+                logger.debug("Wrote cache %s", cache_path_w)
+                if want_glb_for_preview:
+                    render_glb_to_image(
+                        cache_path_w,
+                        Path(preview_image_path),
+                        config.preview_settings,
+                    )
+                if want_glb_for_mesh:
+                    _maybe_export_mesh_from_glb(glb_data)
+
         if config.server:
             if yacv.server_thread is None:
                 yacv.start()
@@ -463,6 +615,155 @@ def render_part(
             yacv.stop()
 
 
+def build_tube_from_path(path, config, aux=None, face_kwargs: Optional[dict] = None):
+    """
+    Build (sweep) the tube solid from a path using the configured face type.
+
+    This is the shared geometry builder used by `draw_part`, and can also be used
+    by callers that want to post-process the tube solid into an assembly.
+    """
+    face_kwargs_dict = face_kwargs or {}
+    face_type = config.tube_settings.face_type
+    face_kw = config.tube_settings.to_led_circle_face_kwargs(
+        orient_to_path=path,
+        **face_kwargs_dict,
+    )
+
+    if face_type == 'led_circle_diffusion_pyramids':
+        num_samples = 30
+        samples = sample_path_for_profiles(path, num_samples=num_samples)
+        path_length = samples[-1]['arc_length'] if samples else 0.0
+
+        dr = config.tube_settings.diffusion_ridges
+        if not dr:
+            raise ValueError("led_circle_diffusion_pyramids requires diffusion_ridges in config")
+        ridge_width = dr['ridge_width']
+        ridge_spacing = dr['ridge_spacing']
+        ridge_depth = dr['ridge_depth']
+
+        faces = []
+        min_ridge = max(0.5, ridge_depth * 0.2)
+        for sample in samples:
+            t = sample['t']
+            ridge_height = max(
+                min_ridge,
+                _pyramid_ridge_height_at_t(
+                    t, path_length, ridge_width, ridge_spacing, ridge_depth
+                ),
+            )
+            dr_at_t = {**dr, 'ridge_height': ridge_height}
+            face_kw_at_t = {**face_kw, 'orient_to_path': None, 'diffusion_ridges': dr_at_t}
+            face_i = create_led_circle_face(**face_kw_at_t)
+            plane = Plane(origin=sample['point'], normal=sample['tangent'])
+            face_i = face_i.moved(Location(plane))
+            # Sort faces by area (descending) for consistent ordering across sections.
+            sorted_faces = sorted(face_i.faces(), key=lambda f: f.Area(), reverse=True)
+            from cadquery.func import compound
+            face_i = compound(sorted_faces)
+            faces.append(face_i)
+
+        try:
+            return sweep(faces, path, aux=aux)
+        except Exception as e:
+            raise RuntimeError(
+                f"led_circle_diffusion_pyramids multisection sweep failed: {e!r}. "
+                f"num_sections={len(faces)}, path_length={path_length:.1f}mm, "
+                f"ridge_depth={ridge_depth}, ridge_width={ridge_width}, ridge_spacing={ridge_spacing}"
+            ) from e
+
+    if face_type == 'solid_circle_pyramid':
+        dr = config.tube_settings.diffusion_ridges or {}
+        ridge_width = dr.get('ridge_width', 2.0)
+        ridge_spacing = dr.get('ridge_spacing', 1.0)
+        ridge_depth = dr.get('ridge_depth', 2.5)
+        pitch = ridge_width + ridge_spacing
+        sections_per_pyramid = 5
+
+        samples = sample_path_for_pyramid_profiles(
+            path, pitch=pitch, sections_per_pyramid=sections_per_pyramid
+        )
+        path_length = samples[-1]['arc_length']
+        num_pyramids = path_length / pitch
+        logger.info(
+            "solid_circle_pyramid: %d sections, %.1f mm path, ~%.0f pyramids (pitch=%.1f mm)",
+            len(samples), path_length, num_pyramids, pitch,
+        )
+        base_radius = config.tube_settings.outer_radius
+
+        faces = []
+        for sample in samples:
+            t = sample['t']
+            bulge = _pyramid_ridge_height_at_t(t, path_length, ridge_width, ridge_spacing, ridge_depth)
+            radius = base_radius + bulge
+            face_i = create_solid_circle_face(
+                outer_radius=radius,
+                wall_thickness=face_kw.get('wall_thickness', 1.0),
+                orient_to_path=None,
+            )
+            plane = Plane(origin=sample['point'], normal=sample['tangent'])
+            face_i = face_i.moved(Location(plane))
+            faces.append(face_i)
+
+        return sweep(faces, path, aux=aux)
+
+    if face_type == 'led_circle':
+        return sweep(create_led_circle_face(**face_kw), path, aux=aux)
+    if face_type == 'solid_circle':
+        return sweep(create_solid_circle_face(**face_kw), path, aux=aux)
+    if face_type == 'square':
+        return sweep(create_square_face(**face_kw), path, aux=aux)
+
+    raise ValueError(f"Unknown face_type: {face_type!r}")
+
+
+def maybe_export_named_parts(named_parts: Dict[str, object], config) -> None:
+    """
+    Optional per-part export helper used by assembly-producing knot scripts.
+
+    Behavior is controlled by CLI flags parsed into config:
+    - config.export_parts: comma-separated tokens (assembly,tube,clamp_a,clamp_b,clamp_halves,all)
+    - config.export_parts_dir: directory to write files into
+    """
+    parts_spec = getattr(config, "export_parts", None)
+    out_dir = getattr(config, "export_parts_dir", None)
+    if not parts_spec or not out_dir:
+        return
+
+    tokens = {t.strip().lower() for t in str(parts_spec).split(",") if t.strip()}
+    if "all" in tokens:
+        tokens = {"assembly", "tube", "clamp_a", "clamp_b"}
+    if "clamp_halves" in tokens:
+        tokens.discard("clamp_halves")
+        tokens |= {"clamp_a", "clamp_b"}
+
+    ext = ".stl"
+    if getattr(config.export, "filepath", None):
+        ext = os.path.splitext(config.export.filepath)[1].lower() or ".stl"
+    os.makedirs(out_dir, exist_ok=True)
+
+    for key in sorted(tokens):
+        obj = named_parts.get(key)
+        if obj is None:
+            continue
+        out_path = os.path.join(out_dir, f"{(config.name or 'knot')}_{key}{ext}")
+        if isinstance(obj, cq.Assembly):
+            obj.export(
+                out_path,
+                exportType="STEP" if ext in [".step", ".stp"] else ("GLB" if ext == ".glb" else None),
+                tolerance=config.export.tolerance,
+                angularTolerance=config.export.angular_tolerance,
+            )
+        else:
+            solid = obj.val() if hasattr(obj, "val") else obj
+            cq.exporters.export(
+                solid,
+                out_path,
+                tolerance=config.export.tolerance,
+                angularTolerance=config.export.angular_tolerance,
+                opt={"ascii": config.export.stl_ascii} if ext == ".stl" else None,
+            )
+
+
 def draw_part(path, config, aux=None, **face_kwargs):
     """
     Create and render a part by sweeping a face profile along a path.
@@ -519,108 +820,7 @@ def draw_part(path, config, aux=None, **face_kwargs):
 
     # We need the solid: sweep once (export, preview, or cache miss)
     logger.debug("Sweeping and rendering.")
-    face_type = config.tube_settings.face_type
-    face_kw = config.tube_settings.to_led_circle_face_kwargs(
-        orient_to_path=path,
-        **face_kwargs_dict
-    )
-
-    if face_type == 'led_circle_diffusion_pyramids':
-        # Multisection sweep: ridges rise and fall like pyramids along the path
-        num_samples = 30
-        samples = sample_path_for_profiles(path, num_samples=num_samples)
-        path_length = samples[-1]['arc_length'] if samples else 0.0
-
-        dr = config.tube_settings.diffusion_ridges
-        if not dr:
-            raise ValueError("led_circle_diffusion_pyramids requires diffusion_ridges in config")
-        ridge_width = dr['ridge_width']
-        ridge_spacing = dr['ridge_spacing']
-        ridge_depth = dr['ridge_depth']
-
-        faces = []
-        # Use minimum ridge height to keep topology consistent (same face count per section).
-        # Very small ridges produce degenerate geometry and varying face counts across sections.
-        min_ridge = max(0.5, ridge_depth * 0.2)
-
-        for sample in samples:
-            t = sample['t']
-            ridge_height = max(
-                min_ridge,
-                _pyramid_ridge_height_at_t(
-                    t, path_length, ridge_width, ridge_spacing, ridge_depth
-                ),
-            )
-            dr_at_t = {**dr, 'ridge_height': ridge_height}
-            face_kw_at_t = {**face_kw, 'orient_to_path': None, 'diffusion_ridges': dr_at_t}
-            face_i = create_led_circle_face(**face_kw_at_t)
-            plane = Plane(origin=sample['point'], normal=sample['tangent'])
-            face_i = face_i.moved(Location(plane))
-            # Sort faces by area (descending) for consistent ordering across sections.
-            sorted_faces = sorted(face_i.faces(), key=lambda f: f.Area(), reverse=True)
-            from cadquery.func import compound
-            face_i = compound(sorted_faces)
-            faces.append(face_i)
-
-        try:
-            result = sweep(faces, path, aux=aux)
-        except Exception as e:
-            raise RuntimeError(
-                f"led_circle_diffusion_pyramids multisection sweep failed: {e!r}. "
-                f"num_sections={len(faces)}, path_length={path_length:.1f}mm, "
-                f"ridge_depth={ridge_depth}, ridge_width={ridge_width}, ridge_spacing={ridge_spacing}"
-            ) from e
-    elif face_type == 'solid_circle_pyramid':
-        # Multisection sweep: solid_circle with varying radius (pyramid bulge).
-        # Sections align with pyramid pattern: pitch = ridge_width + ridge_spacing; total sections
-        # = sections_per_pyramid * num_pyramids so the pattern repeats correctly.
-        dr = config.tube_settings.diffusion_ridges or {}
-        ridge_width = dr.get('ridge_width', 2.0)
-        ridge_spacing = dr.get('ridge_spacing', 1.0)
-        ridge_depth = dr.get('ridge_depth', 2.5)
-        pitch = ridge_width + ridge_spacing
-        sections_per_pyramid = 5  # valley, rise, peak, fall, valley
-
-        samples = sample_path_for_pyramid_profiles(
-            path, pitch=pitch, sections_per_pyramid=sections_per_pyramid
-        )
-        path_length = samples[-1]['arc_length']
-        num_pyramids = path_length / pitch
-        logger.info(
-            "solid_circle_pyramid: %d sections, %.1f mm path, ~%.0f pyramids (pitch=%.1f mm)",
-            len(samples), path_length, num_pyramids, pitch,
-        )
-        base_radius = config.tube_settings.outer_radius
-
-        faces = []
-        for sample in samples:
-            t = sample['t']
-            bulge = _pyramid_ridge_height_at_t(t, path_length, ridge_width, ridge_spacing, ridge_depth)
-            radius = base_radius + bulge
-            face_i = create_solid_circle_face(
-                outer_radius=radius,
-                wall_thickness=face_kw.get('wall_thickness', 1.0),
-                orient_to_path=None,
-            )
-            plane = Plane(origin=sample['point'], normal=sample['tangent'])
-            face_i = face_i.moved(Location(plane))
-            faces.append(face_i)
-
-        result = sweep(faces, path, aux=aux)
-    elif face_type == 'led_circle':
-        face_fn = create_led_circle_face
-        face_shape = face_fn(**face_kw)
-        result = sweep(face_shape, path, aux=aux)
-    elif face_type == 'solid_circle':
-        face_fn = create_solid_circle_face
-        face_shape = face_fn(**face_kw)
-        result = sweep(face_shape, path, aux=aux)
-    elif face_type == 'square':
-        face_fn = create_square_face
-        face_shape = face_fn(**face_kw)
-        result = sweep(face_shape, path, aux=aux)
-    else:
-        raise ValueError(f"Unknown face_type: {face_type!r}")
+    result = build_tube_from_path(path, config, aux=aux, face_kwargs=face_kwargs_dict)
 
     # Preview-only (no export): tessellate with fine tolerance for smooth tube, render image
     if preview_filepath and not config.export.filepath:
