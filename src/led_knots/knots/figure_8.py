@@ -24,7 +24,7 @@ k = torus_knot(p=5, q=10, num=150).points
 
 # Scale the knot coordinates to fit within the bounding box
 # Using width for x, width for y, and height for z (length)
-knot_coords = scale_pyknot_points(
+knot_points = scale_pyknot_points(
     k,
     width=config.output_bounds.width,
     height=config.output_bounds.width,
@@ -32,10 +32,6 @@ knot_coords = scale_pyknot_points(
     padding=config.tube_settings.outer_radius,
     preserve_aspect_ratio=False,
 )
-
-# Convert numpy array to list of 3D points for CadQuery
-# pyknotid returns points as (x, y, z) coordinates
-knot_points = [(float(p[0]), float(p[1]), float(p[2])) for p in knot_coords]
 
 # Note: Currently when the path is closed, there is an error since faces overlap
 # TODO: Fix closed path handling

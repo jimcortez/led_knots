@@ -6,9 +6,9 @@
 # Output bounds: bounding box for knot path scaling
 # -----------------------------------------------------------------------------
 output_bounds:
-  width: 200    # mm
-  length: 108   # mm
-  height: 100   # mm
+  width: 400    # mm
+  length: 400   # mm
+  height: 120     # mm
 
 # Active cross-section face: led_circle | led_circle_diffusion_pyramids |
 # solid_circle | solid_circle_pyramid | square
@@ -22,7 +22,7 @@ face_settings:
 
   led_circle:
     outer_diameter: 30      # mm – tube outer diameter
-    wall_thickness: 1.0     # mm – outer ring wall thickness
+    wall_thickness: 3.0     # mm – outer ring wall thickness
     rect_inner_x: 4.6       # mm – inner cavity X (e.g. strip height×2 + tolerance)
     rect_inner_y: 11.0      # mm – inner cavity Y (e.g. strip width + tolerance)
     oval_wall_thickness: 0.5   # mm – wall around oval cavity
@@ -52,6 +52,7 @@ face_settings:
 
   solid_circle:
     inherit_from: led_circle
+    outer_diameter: 30      # mm – tube outer diameter
 
   solid_circle_pyramid:
     inherit_from: solid_circle

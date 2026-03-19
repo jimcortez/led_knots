@@ -177,7 +177,7 @@ def scale_pyknot_points(
     min_scaled = scaled.min(axis=0)
     translated = scaled - min_scaled
 
-    return translated
+    return [(float(p[0]), float(p[1]), float(p[2])) for p in translated]
 
 
 # ============================================================================
