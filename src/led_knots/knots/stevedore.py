@@ -27,7 +27,7 @@ config = get_config(name="Stevedore Knot (k6_1)", description="Create and render
 spine_offset_radius = 5.0
 
 k = mk.k6_1(num_points=300)
-knot_coords = scale_pyknot_points(
+knot_points = scale_pyknot_points(
     k.points,
     width=config.output_bounds.width,
     height=config.output_bounds.width,
@@ -35,7 +35,6 @@ knot_coords = scale_pyknot_points(
     padding=config.tube_settings.outer_radius,
     preserve_aspect_ratio=False,
 )
-knot_points = [(float(p[0]), float(p[1]), float(p[2])) for p in knot_coords]
 
 # Open path (closed path causes face overlap)
 path = spline(knot_points[:-1])

@@ -208,7 +208,6 @@ def render_part(
     aux=None,
     face_kwargs: Optional[dict] = None,
     preview_stl_path: Optional[Path] = None,
-    preview_image_path: Optional[Union[str, Path]] = None,
 ):
     """
     Render the part based on configuration.
@@ -430,6 +429,36 @@ def render_part(
             )
             sys.exit(2)
 
+        # Preview-only (no export): tessellate a fused compound to STL and render image.
+        # This mirrors knot `draw_part` preview behavior and avoids relying on GLB cache.
+        if getattr(config, "preview_filepath", None) is not None:
+            compound = assy.toCompound()
+            tol = config.preview_settings.mesh_tolerance
+            ang_tol = config.preview_settings.mesh_angular_tolerance
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".stl", delete=False) as tf:
+                tmp_stl = tf.name
+            try:
+                cq.exporters.export(
+                    compound,
+                    tmp_stl,
+                    tolerance=tol,
+                    angularTolerance=ang_tol,
+                    opt={"ascii": False},
+                )
+                render_stl_to_image(
+                    Path(tmp_stl),
+                    Path(config.preview_filepath),
+                    config.preview_settings,
+                )
+            finally:
+                if os.path.exists(tmp_stl):
+                    try:
+                        os.unlink(tmp_stl)
+                    except OSError:
+                        pass
+            return
+
         # No export path: show a fused Compound so yacv reliably displays all parts.
         # (Assemblies exported to GLB directly can be viewer-dependent.)
         compound = assy.toCompound()
@@ -438,7 +467,7 @@ def render_part(
         # Optionally write GLB bytes to cache and/or convert to mesh, using yacv export.
         want_glb_for_cache = cache_path is not None and not getattr(config, "no_cache", False)
         want_glb_for_mesh = getattr(getattr(config, "mesh", None), "filepath", None) is not None
-        want_glb_for_preview = preview_image_path is not None
+        want_glb_for_preview = getattr(config, "preview_filepath", None) is not None
         if cache_path is not None and (want_glb_for_cache or want_glb_for_mesh or want_glb_for_preview):
             export_data = yacv.export(name)
             if export_data is not None:
@@ -451,7 +480,7 @@ def render_part(
                 if want_glb_for_preview:
                     render_glb_to_image(
                         cache_path_w,
-                        Path(preview_image_path),
+                        Path(config.preview_filepath),
                         config.preview_settings,
                     )
                 if want_glb_for_mesh:
