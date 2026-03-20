@@ -164,6 +164,36 @@ def build_tube_clamp_parts(config) -> TubeClampParts:
     groove = intersect(ring, fuse(groove_pos, groove_neg))
     half_neg = cut(half_neg, groove)
 
+    # Alignment notch: key-and-slot to prevent halves from sliding along Z.
+    if bool(getattr(c, "alignment_notch_enabled", True)):
+        notch_w = float(getattr(c, "alignment_notch_width_mm", 3.0))
+        notch_d = float(getattr(c, "alignment_notch_depth_mm", 0.8))
+        notch_clear = float(getattr(c, "alignment_notch_clearance_mm", 0.1))
+        notch_w = max(0.5, min(notch_w, L * 0.5))
+        notch_d = max(0.2, min(notch_d, lap_depth))
+        # Male tab on +Y half: extends from male step into female recess, centered at Z=0.
+        tab_x = max(0.5, lap_step_h * 0.8)
+        tab_pos = box(tab_x, notch_d, notch_w).moved(
+            Location((+outer_radius - lap_step_h + tab_x / 2.0, -lap_depth - notch_d / 2.0, -notch_w / 2.0))
+        )
+        tab_neg = box(tab_x, notch_d, notch_w).moved(
+            Location((-outer_radius + lap_step_h - tab_x / 2.0, -lap_depth - notch_d / 2.0, -notch_w / 2.0))
+        )
+        tab = intersect(ring, fuse(tab_pos, tab_neg))
+        half_pos = fuse(half_pos, tab)
+        # Female slot on -Y half: matching cutout with clearance.
+        slot_x = tab_x + notch_clear
+        slot_y = notch_d + notch_clear
+        slot_z = notch_w + 2.0 * notch_clear
+        slot_pos = box(slot_x, slot_y, slot_z).moved(
+            Location((+outer_radius - lap_step_h + slot_x / 2.0, -lap_depth - slot_y / 2.0, -slot_z / 2.0))
+        )
+        slot_neg = box(slot_x, slot_y, slot_z).moved(
+            Location((-outer_radius + lap_step_h - slot_x / 2.0, -lap_depth - slot_y / 2.0, -slot_z / 2.0))
+        )
+        slot = intersect(ring, fuse(slot_pos, slot_neg))
+        half_neg = cut(half_neg, slot)
+
     # Optional relief pockets: small cutouts inside the groove to let glue escape.
     if bool(getattr(c, "relief_enabled", True)):
         relief_d = float(getattr(c, "relief_depth_mm", 0.3))

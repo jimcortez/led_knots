@@ -136,6 +136,12 @@ class ClampSettings:
         self.relief_depth_mm: float = float(data.get("relief_depth_mm", 0.3))
         self.relief_width_mm: float = float(data.get("relief_width_mm", 0.5))
 
+        # Alignment notch: key-and-slot to prevent halves from sliding along Z.
+        self.alignment_notch_enabled: bool = bool(data.get("alignment_notch_enabled", True))
+        self.alignment_notch_width_mm: float = float(data.get("alignment_notch_width_mm", 3.0))
+        self.alignment_notch_depth_mm: float = float(data.get("alignment_notch_depth_mm", 0.8))
+        self.alignment_notch_clearance_mm: float = float(data.get("alignment_notch_clearance_mm", 0.1))
+
         for k in (
             "clearance_diameter_mm",
             "length_mm",
@@ -150,11 +156,13 @@ class ClampSettings:
             "reg_lip_width_mm",
             "relief_depth_mm",
             "relief_width_mm",
+            "alignment_notch_width_mm",
+            "alignment_notch_depth_mm",
         ):
             if getattr(self, k) <= 0:
                 raise ValueError(f"clamp.{k} must be > 0 (got {getattr(self, k)})")
 
-        for k in ("adhesive_gap_mm", "reg_clearance_mm"):
+        for k in ("adhesive_gap_mm", "reg_clearance_mm", "alignment_notch_clearance_mm"):
             if getattr(self, k) < 0:
                 raise ValueError(f"clamp.{k} must be >= 0 (got {getattr(self, k)})")
 
