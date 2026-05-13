@@ -23,11 +23,11 @@ dependencies = [
     "numpy>=2.4.1",
     "numpy-stl>=3.2.0",
     "pillow>=11.0.0",
+    "py-lib3mf",
     "pyknotid",
     "pyrender>=0.1.45",
     "pyyaml>=6.0",
     "trimesh>=4.0.0",
-    "vtk>=9.0",
     "yacv-server>=0.10.11",
 ]
 
@@ -58,6 +58,7 @@ packages = ["src/led_knots"]
 
 [tool.uv.sources]
 pyknotid = { git = "https://github.com/sashakolpakov/pyknotid.git" }
+py-lib3mf = { git = "https://github.com/jdegenstein/py-lib3mf", tag="v2.4.1.2"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

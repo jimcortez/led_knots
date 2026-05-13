@@ -72,6 +72,32 @@ path:
   min_90_degree_twist_distance: 5   # mm – minimum path length for 90° twist
 
 # -----------------------------------------------------------------------------
+# Print segmentation (optional): split oversized knots into printable segments
+# -----------------------------------------------------------------------------
+max_print_bounds:
+  enabled: true
+  width: 200                # mm – printer X build size
+  length: 200               # mm – printer Y build size
+  height: 100               # mm – printer Z build size
+  clearance_mm: 2.0         # mm – subtract from all sides
+  max_segments: 32          # safety cap for segmentation
+  layout_gap_mm: 12.0       # mm – spacing between laid-out segments
+  path_samples: 1001        # Wire samples used by segmentation DP
+  joint:
+    enabled: false
+    style: twin_pin         # twin_pin | dovetail
+    clearance_mm: 0.2       # mm
+    close_loop: false       # add final join for closed loop paths
+    pin_diameter_mm: 3.0    # mm
+    pin_depth_mm: 4.0       # mm
+    pin_radial_offset_mm: 17.0 # mm (centerline to pin axis)
+    pin_spacing_mm: 7.0     # mm (distance between pin centers)
+    neck_width_mm: 3.0      # mm (dovetail)
+    base_width_mm: 5.0      # mm (dovetail)
+    depth_mm: 4.0           # mm (dovetail/pocket depth)
+    flank_angle_deg: 12.0   # deg (dovetail)
+
+# -----------------------------------------------------------------------------
 # Tube gap (open segment) + clamp settings
 # -----------------------------------------------------------------------------
 tube_gap:
@@ -81,16 +107,17 @@ tube_gap:
 
 clamp:
   enabled: true
-  clearance_diameter_mm: 1.0  # mm – clamp ID = tube OD + clearance
+  clearance_diameter_mm: 0.5  # mm – clamp ID = tube OD + clearance
   length_mm: 18.0             # mm – axial length of the clamp
-  wall_thickness_mm: 2.5      # mm – clamp wall thickness outside the tube
-  lap_depth_mm: 1.0           # mm – how far lap joint steps into wall
-  lap_step_height_mm: 1.5     # mm – radial step height for the seam rabbet
-  lap_clearance_mm: 0.2       # mm – extra clearance so halves assemble easily
+  wall_thickness_mm: 1.25      # mm – clamp wall thickness outside the tube
   wire_hole_diameter_mm: 4.0  # mm – through-hole for wires on one half
   wire_ring_height_mm: 4.0    # mm – ring height above surface
   wire_ring_top_thickness_mm: 1.0   # mm – ring wall thickness at the top
   wire_ring_base_thickness_mm: 2.0  # mm – ring wall thickness at the base (tapers up)
+
+  lap_depth_mm: 1.0           # mm – how far lap joint steps into wall
+  lap_step_height_mm: 1.5     # mm – radial step height for the seam rabbet
+  lap_clearance_mm: 0.2       # mm – extra clearance so halves assemble easily
   adhesive_gap_mm: 0.10       # mm – explicit glue line thickness
   reg_lip_height_mm: 0.8      # mm – tongue height (radial)
   reg_lip_width_mm: 1.2       # mm – tongue width (across seam normal)
@@ -113,7 +140,7 @@ server:
 # Export (3D file output)
 # -----------------------------------------------------------------------------
 export:
-  tolerance: 0.0005         # linear tolerance
+  tolerance: 0.0001         # linear tolerance
   angular_tolerance: 0.05   # rad
   stl_ascii: true           # true = ASCII STL, false = binary
 

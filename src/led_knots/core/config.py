@@ -72,6 +72,82 @@ class OutputBounds:
         self.height = float(data.get('height', 100.0))
 
 
+class PrintJointSettings:
+    """Registration geometry settings for cut boundaries between printed segments."""
+
+    def __init__(self, data: Dict[str, Any]):
+        data = data or {}
+        self.enabled: bool = bool(data.get("enabled", False))
+        self.style: str = str(data.get("style", "twin_pin")).strip().lower()
+        self.clearance_mm: float = float(data.get("clearance_mm", 0.2))
+        self.close_loop: bool = bool(data.get("close_loop", False))
+
+        # twin_pin defaults
+        self.pin_diameter_mm: float = float(data.get("pin_diameter_mm", 3.0))
+        self.pin_depth_mm: float = float(data.get("pin_depth_mm", 4.0))
+        self.pin_radial_offset_mm: float = float(data.get("pin_radial_offset_mm", 17.0))
+        self.pin_spacing_mm: float = float(data.get("pin_spacing_mm", 7.0))
+
+        # dovetail defaults
+        self.neck_width_mm: float = float(data.get("neck_width_mm", 3.0))
+        self.base_width_mm: float = float(data.get("base_width_mm", 5.0))
+        self.depth_mm: float = float(data.get("depth_mm", 4.0))
+        self.flank_angle_deg: float = float(data.get("flank_angle_deg", 12.0))
+
+        if self.style not in ("twin_pin", "dovetail"):
+            raise ValueError(f"max_print_bounds.joint.style must be 'twin_pin' or 'dovetail' (got {self.style!r})")
+        if self.clearance_mm < 0:
+            raise ValueError("max_print_bounds.joint.clearance_mm must be >= 0")
+
+        positive_fields = (
+            "pin_diameter_mm",
+            "pin_depth_mm",
+            "pin_radial_offset_mm",
+            "pin_spacing_mm",
+            "neck_width_mm",
+            "base_width_mm",
+            "depth_mm",
+            "flank_angle_deg",
+        )
+        for key in positive_fields:
+            if getattr(self, key) <= 0:
+                raise ValueError(f"max_print_bounds.joint.{key} must be > 0")
+        if self.base_width_mm <= self.neck_width_mm:
+            raise ValueError("max_print_bounds.joint.base_width_mm must be > neck_width_mm")
+
+
+class MaxPrintBoundsSettings:
+    """Optional print-volume settings for auto-segmentation into printable parts."""
+
+    def __init__(self, data: Dict[str, Any]):
+        data = data or {}
+        self.enabled: bool = bool(data.get("enabled", False))
+        self.width: float = float(data.get("width", 0.0))
+        self.length: float = float(data.get("length", 0.0))
+        self.height: float = float(data.get("height", 0.0))
+        self.clearance_mm: float = float(data.get("clearance_mm", 0.0))
+        self.max_segments: int = int(data.get("max_segments", 32))
+        self.layout_gap_mm: float = float(data.get("layout_gap_mm", 12.0))
+        self.path_samples: int = int(data.get("path_samples", 1001))
+        self.joint = PrintJointSettings(data.get("joint", {}))
+
+        if self.enabled:
+            for key in ("width", "length", "height"):
+                if getattr(self, key) <= 0:
+                    raise ValueError(f"max_print_bounds.{key} must be > 0 when enabled")
+            if self.clearance_mm < 0:
+                raise ValueError("max_print_bounds.clearance_mm must be >= 0")
+            if self.max_segments < 1:
+                raise ValueError("max_print_bounds.max_segments must be >= 1")
+            if self.layout_gap_mm < 0:
+                raise ValueError("max_print_bounds.layout_gap_mm must be >= 0")
+            if self.path_samples < 8:
+                raise ValueError("max_print_bounds.path_samples must be >= 8")
+            usable = [self.width - 2.0 * self.clearance_mm, self.length - 2.0 * self.clearance_mm, self.height - 2.0 * self.clearance_mm]
+            if min(usable) <= 0:
+                raise ValueError("max_print_bounds dimensions minus clearance must be positive")
+
+
 class PathSettings:
     """Path/twist configuration (e.g. min distance for 90° twist)."""
 
@@ -383,6 +459,7 @@ class Config:
         face_data = resolve_face_settings(face_settings_raw, face_type)
         self.tube_settings = TubeSettings(face_type, face_data)
         self.path_settings = PathSettings(config_data.get('path', {}))
+        self.max_print_bounds = MaxPrintBoundsSettings(config_data.get("max_print_bounds", {}))
         self.tube_gap = TubeGapSettings(config_data.get("tube_gap", {}))
         self.clamp = ClampSettings(config_data.get("clamp", {}))
         

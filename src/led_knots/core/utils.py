@@ -34,6 +34,7 @@ from .led_circle import (
 )
 from .path_utils import sample_path_for_profiles, sample_path_for_pyramid_profiles
 from .preview import render_glb_to_image, render_stl_to_image
+from .print_segmentation import build_segmented_tube_assembly
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +201,154 @@ def scale_pyknot_points(
 # DISPLAY AND EXPORT UTILITIES
 # ============================================================================
 
+def _maybe_export_mesh_from_glb(glb_bytes: bytes, config) -> None:
+    """
+    Export an OBJ mesh from GLB bytes when `--output-mesh` is set.
+    """
+    mesh_cfg = getattr(config, "mesh", None)
+    output_path = getattr(mesh_cfg, "filepath", None) if mesh_cfg else None
+    if not output_path:
+        return
+
+    ext = os.path.splitext(str(output_path))[1].lower()
+    if ext != ".obj":
+        logger.error("Mesh export only supports .obj for now (got %s).", ext)
+        sys.exit(2)
+
+    try:
+        scene_or_mesh = trimesh.load(
+            trimesh.util.wrap_as_stream(glb_bytes), file_type="glb"
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("Failed to load GLB for mesh export: %r", exc)
+        sys.exit(2)
+
+    if isinstance(scene_or_mesh, trimesh.Scene):
+        mesh = scene_or_mesh.dump(concatenate=True)
+    else:
+        mesh = scene_or_mesh
+
+    # Unit scaling mm -> m when requested.
+    if mesh_cfg.unit_scale_mm_to_m:
+        mesh.apply_scale(0.001)
+
+    # Basic cleanup for robustness (API varies slightly by trimesh version).
+    if hasattr(mesh, "remove_degenerate_faces"):
+        mesh.remove_degenerate_faces()
+    if hasattr(mesh, "remove_unreferenced_vertices"):
+        mesh.remove_unreferenced_vertices()
+    if hasattr(mesh, "merge_vertices"):
+        mesh.merge_vertices()
+
+    # Watertightness check.
+    if mesh_cfg.watertight_required and not mesh.is_watertight:
+        logger.error("Mesh export aborted: generated mesh is not watertight.")
+        sys.exit(2)
+
+    # Optional decimation.
+    if mesh_cfg.target_face_count is not None:
+        current_faces = len(mesh.faces)
+        target = mesh_cfg.target_face_count
+        if current_faces > target and target > 0:
+            try:
+                mesh = mesh.simplify_quadratic_decimation(target)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning(
+                    "Mesh decimation failed (%r); continuing with original mesh.",
+                    exc,
+                )
+
+    export_dir = os.path.dirname(str(output_path))
+    if export_dir and not os.path.exists(export_dir):
+        os.makedirs(export_dir, exist_ok=True)
+
+    try:
+        mesh.export(str(output_path), file_type="obj")
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("Failed to export OBJ mesh to %s: %r", output_path, exc)
+        sys.exit(2)
+
+    logger.info("Exported mesh OBJ to %s", output_path)
+
+
+def _assembly_to_glb_bytes(assy: cq.Assembly, config) -> bytes:
+    """
+    Export an assembly to GLB bytes using CadQuery (tempfile-backed).
+    """
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".glb", delete=False) as tf:
+        tmp_path = tf.name
+    try:
+        # Use preview tessellation settings for smoothness when viewing/caching.
+        tol = getattr(config, "preview_settings", None)
+        tol_val = getattr(tol, "mesh_tolerance", None)
+        ang_val = getattr(tol, "mesh_angular_tolerance", None)
+        if tol_val is None:
+            tol_val = config.export.tolerance
+        if ang_val is None:
+            ang_val = config.export.angular_tolerance
+
+        assy.export(
+            tmp_path,
+            exportType="GLB",
+            tolerance=float(tol_val),
+            angularTolerance=float(ang_val),
+        )
+        with open(tmp_path, "rb") as f:
+            return f.read()
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def _solid_to_glb_bytes(
+    solid,
+    *,
+    config,
+    stl_tolerance: float,
+    stl_angular_tolerance: float,
+    stl_ascii: bool,
+) -> bytes:
+    """
+    Generate GLB bytes headlessly from a CadQuery solid/workplane using:
+    CadQuery STL export -> trimesh STL load -> trimesh GLB export.
+    """
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".stl", delete=False) as tf_stl:
+        tmp_stl_path = tf_stl.name
+    with tempfile.NamedTemporaryFile(suffix=".glb", delete=False) as tf_glb:
+        tmp_glb_path = tf_glb.name
+
+    try:
+        cq.exporters.export(
+            solid,
+            tmp_stl_path,
+            tolerance=float(stl_tolerance),
+            angularTolerance=float(stl_angular_tolerance),
+            opt={"ascii": bool(stl_ascii)},
+        )
+
+        loaded = trimesh.load(tmp_stl_path)
+        if isinstance(loaded, trimesh.Scene):
+            mesh = loaded.dump(concatenate=True)
+        else:
+            mesh = loaded
+
+        mesh.export(tmp_glb_path, file_type="glb")
+        with open(tmp_glb_path, "rb") as f:
+            return f.read()
+    finally:
+        for p in (tmp_stl_path, tmp_glb_path):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+
+
 def render_part(
     part: Union[cq.Workplane, cq.Solid, cq.Compound, bytes],
     config,
@@ -208,154 +357,80 @@ def render_part(
     aux=None,
     face_kwargs: Optional[dict] = None,
     preview_stl_path: Optional[Path] = None,
+    preview_image_path: Optional[Union[str, Path]] = None,
 ):
     """
     Render the part based on configuration.
 
-    Args:
-        part: The Workplane, Solid, Compound, or GLB bytes (from cache) to render.
-        config: Config object with export, server, name, no_cache, etc.
-        cache_path: Optional path to write GLB bytes after building (when part is solid
-                    and not config.no_cache). Ignored when part is bytes.
-        path: Optional sweep path; when provided and cache_path is not, cache path is
-              derived from config and path/aux/face_kwargs (only used when part is solid).
-        aux: Optional auxiliary path for sweep orientation (used to derive cache path).
-        face_kwargs: Optional dict passed to cache key (e.g. rotation_z) when deriving cache path.
+    Key behavior:
+    - When `config.server` is false: never call `yacv_server` (no show/server/export).
+      All GLB/mesh outputs are generated headlessly via CadQuery + Trimesh.
+    - When `config.server` is true: `yacv_server` is used only for viewing (show/server).
     """
     name = config.name or "Knot"
     is_glb_bytes = isinstance(part, bytes)
-    # Derive cache path when rendering a solid and path is provided
+
     if not is_glb_bytes and cache_path is None and path is not None:
         cache_path = cache_path_for_part(
             config, path, aux=aux, face_kwargs=face_kwargs or {}
         )
-    # Set environment variable before importing yacv_server if we only want export
-    if config.export.filepath and not config.server:
-        os.environ['YACV_DISABLE_SERVER'] = '1'
 
-    # Import yacv_server (server will auto-start unless disabled)
-    from yacv_server import yacv, show
+    yacv = None
+    show = None
+    if getattr(config, "server", False):
+        from yacv_server import yacv as yacv_server, show as yacv_show
 
-    def _maybe_export_mesh_from_glb(glb_bytes: bytes) -> None:
-        """Export an OBJ mesh from GLB bytes when --output-mesh is set."""
-        mesh_cfg = getattr(config, "mesh", None)
-        output_path = getattr(mesh_cfg, "filepath", None) if mesh_cfg else None
-        if not output_path:
-            return
-
-        ext = os.path.splitext(output_path)[1].lower()
-        if ext != ".obj":
-            logger.error("Mesh export only supports .obj for now (got %s).", ext)
-            sys.exit(2)
-
-        try:
-            scene_or_mesh = trimesh.load(trimesh.util.wrap_as_stream(glb_bytes), file_type="glb")
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.error("Failed to load GLB for mesh export: %r", exc)
-            sys.exit(2)
-
-        if isinstance(scene_or_mesh, trimesh.Scene):
-            mesh = scene_or_mesh.dump(concatenate=True)
-        else:
-            mesh = scene_or_mesh
-
-        mesh_cfg = config.mesh
-
-        # Unit scaling mm -> m when requested.
-        if mesh_cfg.unit_scale_mm_to_m:
-            mesh.apply_scale(0.001)
-
-        # Basic cleanup for robustness (API varies slightly by version).
-        if hasattr(mesh, "remove_degenerate_faces"):
-            mesh.remove_degenerate_faces()
-        if hasattr(mesh, "remove_unreferenced_vertices"):
-            mesh.remove_unreferenced_vertices()
-        if hasattr(mesh, "merge_vertices"):
-            mesh.merge_vertices()
-
-        # Watertightness check.
-        if mesh_cfg.watertight_required and not mesh.is_watertight:
-            logger.error("Mesh export aborted: generated mesh is not watertight.")
-            sys.exit(2)
-
-        # Optional decimation.
-        if mesh_cfg.target_face_count is not None:
-            current_faces = len(mesh.faces)
-            target = mesh_cfg.target_face_count
-            if current_faces > target and target > 0:
-                try:
-                    mesh = mesh.simplify_quadratic_decimation(target)
-                except Exception as exc:  # pragma: no cover - defensive
-                    logger.warning("Mesh decimation failed (%r); continuing with original mesh.", exc)
-
-        export_dir = os.path.dirname(output_path)
-        if export_dir and not os.path.exists(export_dir):
-            os.makedirs(export_dir, exist_ok=True)
-
-        try:
-            mesh.export(output_path, file_type="obj")
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.error("Failed to export OBJ mesh to %s: %r", output_path, exc)
-            sys.exit(2)
-
-        logger.info("Exported mesh OBJ to %s", output_path)
-
-    # ------------------------------------------------------------------------
-    # Assembly support
-    # ------------------------------------------------------------------------
-    # We treat assemblies as first-class export targets (STEP/GLB hierarchy),
-    # while still supporting single-solid exports for STL/3MF and legacy flows.
-    is_assembly = isinstance(part, cq.Assembly)
-
-    def _assembly_to_glb_bytes(assy: cq.Assembly) -> bytes:
-        """Export assembly to GLB bytes (tempfile-backed)."""
-        import tempfile
-        with tempfile.NamedTemporaryFile(suffix=".glb", delete=False) as tf:
-            tmp_path = tf.name
-        try:
-            # Use preview tessellation for smoothness when viewing/caching.
-            tol = getattr(config, "preview_settings", None)
-            tol_val = getattr(tol, "mesh_tolerance", None)
-            ang_val = getattr(tol, "mesh_angular_tolerance", None)
-            if tol_val is None:
-                tol_val = config.export.tolerance
-            if ang_val is None:
-                ang_val = config.export.angular_tolerance
-            assy.export(tmp_path, exportType="GLB", tolerance=float(tol_val), angularTolerance=float(ang_val))
-            with open(tmp_path, "rb") as f:
-                return f.read()
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+        yacv = yacv_server
+        show = yacv_show
 
     if is_glb_bytes:
         glb_bytes = part
-        # Pre-built GLB from cache: show and/or write to export path and mesh.
+
         if config.export.filepath:
             file_ext = os.path.splitext(config.export.filepath)[1].lower()
-            if file_ext in ['.glb', '.gltf']:
-                export_dir = os.path.dirname(config.export.filepath)
-                if export_dir and not os.path.exists(export_dir):
-                    os.makedirs(export_dir, exist_ok=True)
-                with open(config.export.filepath, 'wb') as f:
+            export_dir = os.path.dirname(config.export.filepath)
+            if export_dir and not os.path.exists(export_dir):
+                os.makedirs(export_dir, exist_ok=True)
+
+            if file_ext == ".glb":
+                with open(config.export.filepath, "wb") as f:
                     f.write(glb_bytes)
                 logger.info("Exported %s to %s (GLB format)", name, config.export.filepath)
-                _maybe_export_mesh_from_glb(glb_bytes)
-                return
-            # Other formats not supported when part is from cache
-            logger.error("Export format %s not supported when using cached GLB", file_ext)
-            sys.exit(2)
-        show(glb_bytes, names=name)
-        # Mesh export from cached GLB when viewing from cache.
-        _maybe_export_mesh_from_glb(glb_bytes)
-        if config.server:
+            elif file_ext == ".gltf":
+                scene_or_mesh = trimesh.load(
+                    trimesh.util.wrap_as_stream(glb_bytes), file_type="glb"
+                )
+                if isinstance(scene_or_mesh, trimesh.Scene):
+                    mesh = scene_or_mesh.dump(concatenate=True)
+                else:
+                    mesh = scene_or_mesh
+                mesh.export(str(config.export.filepath), file_type="gltf")
+                logger.info("Exported %s to %s (GLTF format)", name, config.export.filepath)
+            else:
+                logger.error(
+                    "Export format %s not supported when using cached GLB",
+                    file_ext,
+                )
+                sys.exit(2)
+
+            _maybe_export_mesh_from_glb(glb_bytes, config)
+            return
+
+        # No export: show only when server is active.
+        if show is not None:
+            show(glb_bytes, names=name)
+        _maybe_export_mesh_from_glb(glb_bytes, config)
+
+        if yacv is not None:
             if yacv.server_thread is None:
                 yacv.start()
             logger.info("Server started. View %s in the web interface.", name)
             if yacv.server is not None:
-                logger.info("Server URL: http://%s:%s", yacv.server.server_name, yacv.server.server_port)
+                logger.info(
+                    "Server URL: http://%s:%s",
+                    yacv.server.server_name,
+                    yacv.server.server_port,
+                )
             try:
                 while True:
                     time.sleep(1)
@@ -364,18 +439,17 @@ def render_part(
                 yacv.stop()
         return
 
-    # ------------------------------------------------------------------------
-    # Export / show for Assembly (non-bytes)
-    # ------------------------------------------------------------------------
+    is_assembly = isinstance(part, cq.Assembly)
+
     if is_assembly:
         assy: cq.Assembly = part
+
         if config.export.filepath:
             export_dir = os.path.dirname(config.export.filepath)
             if export_dir and not os.path.exists(export_dir):
                 os.makedirs(export_dir, exist_ok=True)
             file_ext = os.path.splitext(config.export.filepath)[1].lower()
 
-            # STEP preserves part hierarchy.
             if file_ext in [".step", ".stp"]:
                 assy.export(
                     config.export.filepath,
@@ -387,7 +461,6 @@ def render_part(
                 logger.info("Exported %s to %s (STEP assembly)", name, config.export.filepath)
                 return
 
-            # GLB/GLTF exports full assembly.
             if file_ext in [".glb", ".gltf"]:
                 assy.export(
                     config.export.filepath,
@@ -396,10 +469,19 @@ def render_part(
                     angularTolerance=config.export.angular_tolerance,
                 )
                 logger.info("Exported %s to %s (GLTF/GLB assembly)", name, config.export.filepath)
-                # Optionally cache the same bytes for fast preview flows.
-                if cache_path is not None and not getattr(config, "no_cache", False) and file_ext == ".glb":
+
+                # Optionally cache GLB bytes for preview flows.
+                if (
+                    cache_path is not None
+                    and not getattr(config, "no_cache", False)
+                    and file_ext == ".glb"
+                ):
                     try:
-                        cache_path_w = Path(cache_path) if not isinstance(cache_path, Path) else cache_path
+                        cache_path_w = (
+                            Path(cache_path)
+                            if not isinstance(cache_path, Path)
+                            else cache_path
+                        )
                         cache_path_w.parent.mkdir(parents=True, exist_ok=True)
                         with open(config.export.filepath, "rb") as f:
                             glb_data = f.read()
@@ -410,7 +492,6 @@ def render_part(
                         pass
                 return
 
-            # STL/3MF: export fused compound of assembly.
             if file_ext in [".stl", ".3mf"]:
                 solid = assy.toCompound()
                 cq.exporters.export(
@@ -420,7 +501,12 @@ def render_part(
                     angularTolerance=config.export.angular_tolerance,
                     opt={"ascii": config.export.stl_ascii} if file_ext == ".stl" else None,
                 )
-                logger.info("Exported %s to %s (%s fused)", name, config.export.filepath, file_ext.upper().lstrip("."))
+                logger.info(
+                    "Exported %s to %s (%s fused)",
+                    name,
+                    config.export.filepath,
+                    file_ext.upper().lstrip("."),
+                )
                 return
 
             logger.error(
@@ -430,12 +516,12 @@ def render_part(
             sys.exit(2)
 
         # Preview-only (no export): tessellate a fused compound to STL and render image.
-        # This mirrors knot `draw_part` preview behavior and avoids relying on GLB cache.
         if getattr(config, "preview_filepath", None) is not None:
             compound = assy.toCompound()
             tol = config.preview_settings.mesh_tolerance
             ang_tol = config.preview_settings.mesh_angular_tolerance
             import tempfile
+
             with tempfile.NamedTemporaryFile(suffix=".stl", delete=False) as tf:
                 tmp_stl = tf.name
             try:
@@ -459,39 +545,46 @@ def render_part(
                         pass
             return
 
-        # No export path: show a fused Compound so yacv reliably displays all parts.
-        # (Assemblies exported to GLB directly can be viewer-dependent.)
+        # No export path: show only when server is active.
         compound = assy.toCompound()
-        show(compound, names=name)
+        if show is not None:
+            show(compound, names=name)
 
-        # Optionally write GLB bytes to cache and/or convert to mesh, using yacv export.
         want_glb_for_cache = cache_path is not None and not getattr(config, "no_cache", False)
         want_glb_for_mesh = getattr(getattr(config, "mesh", None), "filepath", None) is not None
         want_glb_for_preview = getattr(config, "preview_filepath", None) is not None
-        if cache_path is not None and (want_glb_for_cache or want_glb_for_mesh or want_glb_for_preview):
-            export_data = yacv.export(name)
-            if export_data is not None:
-                glb_data, _ = export_data
-                cache_path_w = Path(cache_path) if not isinstance(cache_path, Path) else cache_path
-                cache_path_w.parent.mkdir(parents=True, exist_ok=True)
-                with open(cache_path_w, "wb") as f:
-                    f.write(glb_data)
-                logger.debug("Wrote cache %s", cache_path_w)
-                if want_glb_for_preview:
-                    render_glb_to_image(
-                        cache_path_w,
-                        Path(config.preview_filepath),
-                        config.preview_settings,
-                    )
-                if want_glb_for_mesh:
-                    _maybe_export_mesh_from_glb(glb_data)
 
-        if config.server:
+        if cache_path is not None and (
+            want_glb_for_cache or want_glb_for_mesh or want_glb_for_preview
+        ):
+            glb_data = _assembly_to_glb_bytes(assy, config)
+            cache_path_w = (
+                Path(cache_path) if not isinstance(cache_path, Path) else cache_path
+            )
+            cache_path_w.parent.mkdir(parents=True, exist_ok=True)
+            with open(cache_path_w, "wb") as f:
+                f.write(glb_data)
+            logger.debug("Wrote cache %s", cache_path_w)
+
+            if want_glb_for_preview:
+                render_glb_to_image(
+                    cache_path_w,
+                    Path(config.preview_filepath),
+                    config.preview_settings,
+                )
+            if want_glb_for_mesh:
+                _maybe_export_mesh_from_glb(glb_data, config)
+
+        if yacv is not None:
             if yacv.server_thread is None:
                 yacv.start()
             logger.info("Server started. View %s in the web interface.", name)
             if yacv.server is not None:
-                logger.info("Server URL: http://%s:%s", yacv.server.server_name, yacv.server.server_port)
+                logger.info(
+                    "Server URL: http://%s:%s",
+                    yacv.server.server_name,
+                    yacv.server.server_port,
+                )
             try:
                 while True:
                     time.sleep(1)
@@ -503,25 +596,24 @@ def render_part(
     # Part is a solid/workplane
     if isinstance(part, (cq.Solid, cq.Compound)):
         solid = part
-    elif hasattr(part, 'val'):
+    elif hasattr(part, "val"):
         solid = part.val()
     else:
         solid = part
 
-    # If export is specified, export to the filepath
     if config.export.filepath:
         export_dir = os.path.dirname(config.export.filepath)
         if export_dir and not os.path.exists(export_dir):
             os.makedirs(export_dir, exist_ok=True)
         file_ext = os.path.splitext(config.export.filepath)[1].lower()
 
-        if file_ext == '.stl':
+        if file_ext == ".stl":
             cq.exporters.export(
                 solid,
                 config.export.filepath,
                 tolerance=config.export.tolerance,
                 angularTolerance=config.export.angular_tolerance,
-                opt={'ascii': config.export.stl_ascii},
+                opt={"ascii": config.export.stl_ascii},
             )
             logger.info("Exported %s to %s (STL format)", name, config.export.filepath)
             if preview_image_path:
@@ -531,12 +623,13 @@ def render_part(
                     config.preview_settings,
                 )
             return
-        if file_ext in ['.step', '.stp']:
+
+        if file_ext in [".step", ".stp"]:
             cq.exporters.export(
                 solid,
                 config.export.filepath,
                 tolerance=config.export.tolerance,
-                angularTolerance=config.export.angular_tolerance
+                angularTolerance=config.export.angular_tolerance,
             )
             logger.info("Exported %s to %s (STEP format)", name, config.export.filepath)
             if preview_image_path and preview_stl_path is not None:
@@ -545,7 +638,7 @@ def render_part(
                     str(preview_stl_path),
                     tolerance=config.export.tolerance,
                     angularTolerance=config.export.angular_tolerance,
-                    opt={'ascii': config.export.stl_ascii},
+                    opt={"ascii": config.export.stl_ascii},
                 )
                 render_stl_to_image(
                     preview_stl_path,
@@ -553,12 +646,13 @@ def render_part(
                     config.preview_settings,
                 )
             return
-        if file_ext == '.3mf':
+
+        if file_ext == ".3mf":
             cq.exporters.export(
                 solid,
                 config.export.filepath,
                 tolerance=config.export.tolerance,
-                angularTolerance=config.export.angular_tolerance
+                angularTolerance=config.export.angular_tolerance,
             )
             logger.info("Exported %s to %s (3MF format)", name, config.export.filepath)
             if preview_image_path and preview_stl_path is not None:
@@ -567,7 +661,7 @@ def render_part(
                     str(preview_stl_path),
                     tolerance=config.export.tolerance,
                     angularTolerance=config.export.angular_tolerance,
-                    opt={'ascii': config.export.stl_ascii},
+                    opt={"ascii": config.export.stl_ascii},
                 )
                 render_stl_to_image(
                     preview_stl_path,
@@ -575,67 +669,97 @@ def render_part(
                     config.preview_settings,
                 )
             return
-        if file_ext in ['.glb', '.gltf']:
-            show(solid, names=name)
-            export_data = yacv.export(name)
-            if export_data is None:
-                logger.error("Could not export %s", name)
-                sys.exit(1)
-            glb_data, _ = export_data
-            with open(config.export.filepath, 'wb') as f:
-                f.write(glb_data)
-            logger.info("Exported %s to %s (GLB format)", name, config.export.filepath)
-            if cache_path is not None and not getattr(config, 'no_cache', False):
-                cache_path = Path(cache_path) if not isinstance(cache_path, Path) else cache_path
-                cache_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(cache_path, 'wb') as f:
-                    f.write(glb_data)
-                logger.debug("Wrote cache %s", cache_path)
-            if preview_image_path and cache_path is not None:
-                cache_path_w = Path(cache_path) if not isinstance(cache_path, Path) else cache_path
-                if cache_path_w.exists():
+
+        if file_ext in [".glb", ".gltf"]:
+            glb_bytes = _solid_to_glb_bytes(
+                solid,
+                config=config,
+                stl_tolerance=config.export.tolerance,
+                stl_angular_tolerance=config.export.angular_tolerance,
+                stl_ascii=config.export.stl_ascii,
+            )
+
+            if file_ext == ".glb":
+                with open(config.export.filepath, "wb") as f:
+                    f.write(glb_bytes)
+                logger.info("Exported %s to %s (GLB format)", name, config.export.filepath)
+            else:
+                scene_or_mesh = trimesh.load(
+                    trimesh.util.wrap_as_stream(glb_bytes), file_type="glb"
+                )
+                if isinstance(scene_or_mesh, trimesh.Scene):
+                    mesh = scene_or_mesh.dump(concatenate=True)
+                else:
+                    mesh = scene_or_mesh
+                mesh.export(str(config.export.filepath), file_type="gltf")
+                logger.info(
+                    "Exported %s to %s (GLTF format)", name, config.export.filepath
+                )
+
+            # Write cache (GLB bytes) when reuse is enabled.
+            if cache_path is not None and not getattr(config, "no_cache", False):
+                cache_path_w = (
+                    Path(cache_path)
+                    if not isinstance(cache_path, Path)
+                    else cache_path
+                )
+                cache_path_w.parent.mkdir(parents=True, exist_ok=True)
+                with open(cache_path_w, "wb") as f:
+                    f.write(glb_bytes)
+                logger.debug("Wrote cache %s", cache_path_w)
+
+                if preview_image_path and cache_path_w.exists():
                     render_glb_to_image(
                         cache_path_w,
                         Path(preview_image_path),
                         config.preview_settings,
                     )
-            # Mesh export from freshly generated GLB.
-            _maybe_export_mesh_from_glb(glb_data)
+
+            _maybe_export_mesh_from_glb(glb_bytes, config)
             return
 
         logger.error(
             "Unknown export file extension '%s'. Supported: .stl, .step, .stp, .3mf, .glb, .gltf.",
-            file_ext
+            file_ext,
         )
         sys.exit(2)
 
-    # Display path (no export): show solid, optionally write GLB to cache
-    show(solid, names=name)
-    # For display flows, we may still want a GLB even when --no-cache is set
-    # so that mesh export has something to convert. We always respect --no-cache
-    # for reuse across runs, but for the current invocation we can generate and
-    # write a GLB when either caching is enabled or a mesh export is requested.
-    want_glb_for_cache = cache_path is not None and not getattr(config, 'no_cache', False)
+    # Display path (no export): show solid only when server is active.
+    if show is not None:
+        show(solid, names=name)
+
+    want_glb_for_cache = cache_path is not None and not getattr(config, "no_cache", False)
     want_glb_for_mesh = getattr(getattr(config, "mesh", None), "filepath", None) is not None
     if cache_path is not None and (want_glb_for_cache or want_glb_for_mesh):
-        export_data = yacv.export(name)
-        if export_data is not None:
-            glb_data, _ = export_data
-            cache_path = Path(cache_path) if not isinstance(cache_path, Path) else cache_path
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(cache_path, 'wb') as f:
-                f.write(glb_data)
-            logger.debug("Wrote cache %s", cache_path)
-            # If this run requested a mesh, convert from the freshly written GLB.
-            if want_glb_for_mesh:
-                _maybe_export_mesh_from_glb(glb_data)
+        glb_bytes = _solid_to_glb_bytes(
+            solid,
+            config=config,
+            stl_tolerance=config.preview_settings.mesh_tolerance,
+            stl_angular_tolerance=config.preview_settings.mesh_angular_tolerance,
+            stl_ascii=False,
+        )
 
-    if config.server:
+        cache_path_w = (
+            Path(cache_path) if not isinstance(cache_path, Path) else cache_path
+        )
+        cache_path_w.parent.mkdir(parents=True, exist_ok=True)
+        with open(cache_path_w, "wb") as f:
+            f.write(glb_bytes)
+        logger.debug("Wrote cache %s", cache_path_w)
+
+        if want_glb_for_mesh:
+            _maybe_export_mesh_from_glb(glb_bytes, config)
+
+    if yacv is not None:
         if yacv.server_thread is None:
             yacv.start()
         logger.info("Server started. View %s in the web interface.", name)
         if yacv.server is not None:
-            logger.info("Server URL: http://%s:%s", yacv.server.server_name, yacv.server.server_port)
+            logger.info(
+                "Server URL: http://%s:%s",
+                yacv.server.server_name,
+                yacv.server.server_port,
+            )
         try:
             while True:
                 time.sleep(1)
@@ -847,9 +971,18 @@ def draw_part(path, config, aux=None, **face_kwargs):
         render_part(glb_bytes, config)
         return None
 
-    # We need the solid: sweep once (export, preview, or cache miss)
+    # We need geometry once (export, preview, or cache miss).
     logger.debug("Sweeping and rendering.")
-    result = build_tube_from_path(path, config, aux=aux, face_kwargs=face_kwargs_dict)
+    if getattr(config.max_print_bounds, "enabled", False):
+        result = build_segmented_tube_assembly(
+            path,
+            config,
+            build_tube_from_path,
+            aux=aux,
+            face_kwargs=face_kwargs_dict,
+        )
+    else:
+        result = build_tube_from_path(path, config, aux=aux, face_kwargs=face_kwargs_dict)
 
     # Preview-only (no export): tessellate with fine tolerance for smooth tube, render image
     if preview_filepath and not config.export.filepath:
@@ -881,17 +1014,20 @@ def draw_part(path, config, aux=None, **face_kwargs):
                     pass
         # Optionally write GLB to cache for other uses (e.g. viewer)
         if cache_path is not None:
-            os.environ['YACV_DISABLE_SERVER'] = '1'
-            from yacv_server import yacv, show
-            show(solid, names=config.name or "Knot")
-            export_data = yacv.export(config.name or "Knot")
-            if export_data is not None:
-                glb_data, _ = export_data
-                cache_path = Path(cache_path) if not isinstance(cache_path, Path) else cache_path
-                cache_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(cache_path, 'wb') as f:
-                    f.write(glb_data)
-                logger.debug("Wrote cache %s", cache_path)
+            cache_path_w = (
+                Path(cache_path) if not isinstance(cache_path, Path) else cache_path
+            )
+            cache_path_w.parent.mkdir(parents=True, exist_ok=True)
+            glb_data = _solid_to_glb_bytes(
+                solid,
+                config=config,
+                stl_tolerance=config.preview_settings.mesh_tolerance,
+                stl_angular_tolerance=config.preview_settings.mesh_angular_tolerance,
+                stl_ascii=False,
+            )
+            with open(cache_path_w, "wb") as f:
+                f.write(glb_data)
+            logger.debug("Wrote cache %s", cache_path_w)
         return result
 
     # Export (with optional preview): render_part exports and optionally generates preview image

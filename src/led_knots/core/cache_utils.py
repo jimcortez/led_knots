@@ -109,6 +109,32 @@ def config_settings_hash(config) -> str:
     out['path_settings'] = {
         'min_90_degree_twist_distance': _round_for_hash(ps.min_90_degree_twist_distance),
     }
+    mp = getattr(config, "max_print_bounds", None)
+    if mp is not None:
+        out["max_print_bounds"] = {
+            "enabled": bool(mp.enabled),
+            "width": _round_for_hash(mp.width),
+            "length": _round_for_hash(mp.length),
+            "height": _round_for_hash(mp.height),
+            "clearance_mm": _round_for_hash(mp.clearance_mm),
+            "max_segments": int(mp.max_segments),
+            "layout_gap_mm": _round_for_hash(mp.layout_gap_mm),
+            "path_samples": int(mp.path_samples),
+            "joint": {
+                "enabled": bool(mp.joint.enabled),
+                "style": str(mp.joint.style),
+                "clearance_mm": _round_for_hash(mp.joint.clearance_mm),
+                "close_loop": bool(mp.joint.close_loop),
+                "pin_diameter_mm": _round_for_hash(mp.joint.pin_diameter_mm),
+                "pin_depth_mm": _round_for_hash(mp.joint.pin_depth_mm),
+                "pin_radial_offset_mm": _round_for_hash(mp.joint.pin_radial_offset_mm),
+                "pin_spacing_mm": _round_for_hash(mp.joint.pin_spacing_mm),
+                "neck_width_mm": _round_for_hash(mp.joint.neck_width_mm),
+                "base_width_mm": _round_for_hash(mp.joint.base_width_mm),
+                "depth_mm": _round_for_hash(mp.joint.depth_mm),
+                "flank_angle_deg": _round_for_hash(mp.joint.flank_angle_deg),
+            },
+        }
     blob = str(sorted(out.items()))
     return hashlib.sha256(blob.encode()).hexdigest()[:_PATH_HASH_DIGEST_LEN]
 
