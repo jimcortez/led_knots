@@ -38,6 +38,61 @@ from .print_segmentation import build_segmented_tube_assembly
 
 logger = logging.getLogger(__name__)
 
+
+def _cadquery_web_viewer_show(config, name: str, *objs) -> None:
+    """Send geometry to cadquery-web-viewer (embedded or remote per config)."""
+    from cadquery_web_viewer import show
+
+    st = config.viewer_server_type
+    block = bool(getattr(config, "viewer_block_until_disconnect", False))
+    if st == "remote":
+        ro = getattr(config, "viewer_remote_options", None) or {}
+        show(
+            *objs,
+            names=name,
+            server_type="remote",
+            remote_options=ro,
+            block_until_disconnect=False,
+        )
+        logger.info(
+            "Posted %s to cadquery-web-viewer at http://%s:%s/",
+            name,
+            ro.get("host", "localhost"),
+            ro.get("port", 32323),
+        )
+        return
+    so = getattr(config, "viewer_server_options", None) or {}
+    show(
+        *objs,
+        names=name,
+        server_type="in-process",
+        server_options=so,
+        block_until_disconnect=block,
+    )
+    logger.info(
+        "cadquery-web-viewer (%s): http://%s:%s/",
+        name,
+        so.get("host", "127.0.0.1"),
+        so.get("port", 32323),
+    )
+
+
+def _exit_if_remote_viewer_idle(config, *, did_followup_glb_work: bool) -> None:
+    """
+    Remote uploads finish quickly, but interpreter teardown can still block (native threads).
+    When this call has no GLB-cache / mesh / preview follow-up, exit immediately so the CLI
+    returns without waiting on OCP/NumPy shutdown.
+    """
+    if did_followup_glb_work:
+        return
+    if not getattr(config, "viewer_enabled", False):
+        return
+    if getattr(config, "viewer_server_type", None) != "remote":
+        return
+    logger.debug("Remote viewer done with no local GLB follow-up; exiting process.")
+    sys.exit(0)
+
+
 # ============================================================================
 # COMMAND LINE PARSING
 # ============================================================================
@@ -52,7 +107,8 @@ def parse_args(description: str = "Create and render a knot model"):
     Returns:
         argparse.Namespace: Parsed arguments with:
             - export: Optional filepath to export the model to (STL, STEP format)
-            - server: Boolean flag (not used for CadQuery, but kept for compatibility)
+            - server: Legacy flag to enable web viewing (uses config server.viewer)
+            - viewer: Optional explicit viewer mode (off / embedded / embedded-block / remote)
             - verbose: Boolean flag to enable DEBUG level logging
     """
     parser = argparse.ArgumentParser(description=description)
@@ -65,7 +121,19 @@ def parse_args(description: str = "Create and render a knot model"):
     parser.add_argument(
         '--server',
         action='store_true',
-        help='Start the yacv server for web viewing'
+        help='Enable browser preview using server.viewer settings from config.yaml',
+    )
+    parser.add_argument(
+        '--viewer',
+        type=str,
+        choices=('off', 'embedded', 'embedded-block', 'remote'),
+        default=None,
+        metavar='MODE',
+        help=(
+            'Web preview: off | embedded (in-process server) | embedded-block '
+            '(wait until browser disconnect) | remote (HTTP to cadquery-web-viewer). '
+            'When set, overrides server.viewer.mode from config.'
+        ),
     )
     parser.add_argument(
         '-v', '--verbose',
@@ -363,9 +431,10 @@ def render_part(
     Render the part based on configuration.
 
     Key behavior:
-    - When `config.server` is false: never call `yacv_server` (no show/server/export).
+    - When ``config.viewer_enabled`` is false: never call ``cadquery_web_viewer`` for display.
       All GLB/mesh outputs are generated headlessly via CadQuery + Trimesh.
-    - When `config.server` is true: `yacv_server` is used only for viewing (show/server).
+    - When ``config.viewer_enabled`` is true: models are sent with ``cadquery_web_viewer.show``
+      (embedded or remote per ``config.yaml`` / ``--viewer``).
     """
     name = config.name or "Knot"
     is_glb_bytes = isinstance(part, bytes)
@@ -375,13 +444,7 @@ def render_part(
             config, path, aux=aux, face_kwargs=face_kwargs or {}
         )
 
-    yacv = None
-    show = None
-    if getattr(config, "server", False):
-        from yacv_server import yacv as yacv_server, show as yacv_show
-
-        yacv = yacv_server
-        show = yacv_show
+    use_viewer = bool(getattr(config, "viewer_enabled", False))
 
     if is_glb_bytes:
         glb_bytes = part
@@ -416,27 +479,12 @@ def render_part(
             _maybe_export_mesh_from_glb(glb_bytes, config)
             return
 
-        # No export: show only when server is active.
-        if show is not None:
-            show(glb_bytes, names=name)
+        # No export: browser preview when viewer is enabled.
+        if use_viewer:
+            _cadquery_web_viewer_show(config, name, glb_bytes)
         _maybe_export_mesh_from_glb(glb_bytes, config)
-
-        if yacv is not None:
-            if yacv.server_thread is None:
-                yacv.start()
-            logger.info("Server started. View %s in the web interface.", name)
-            if yacv.server is not None:
-                logger.info(
-                    "Server URL: http://%s:%s",
-                    yacv.server.server_name,
-                    yacv.server.server_port,
-                )
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                logger.info("Shutting down server...")
-                yacv.stop()
+        mesh_fp = getattr(getattr(config, "mesh", None), "filepath", None)
+        _exit_if_remote_viewer_idle(config, did_followup_glb_work=bool(mesh_fp))
         return
 
     is_assembly = isinstance(part, cq.Assembly)
@@ -545,18 +593,26 @@ def render_part(
                         pass
             return
 
-        # No export path: show only when server is active.
+        # No export path: browser preview when viewer is enabled.
         compound = assy.toCompound()
-        if show is not None:
-            show(compound, names=name)
+        if use_viewer:
+            _cadquery_web_viewer_show(config, name, compound)
 
         want_glb_for_cache = cache_path is not None and not getattr(config, "no_cache", False)
         want_glb_for_mesh = getattr(getattr(config, "mesh", None), "filepath", None) is not None
         want_glb_for_preview = getattr(config, "preview_filepath", None) is not None
 
+        did_followup = False
         if cache_path is not None and (
             want_glb_for_cache or want_glb_for_mesh or want_glb_for_preview
         ):
+            did_followup = True
+            if use_viewer and getattr(config, "viewer_server_type", None) == "remote":
+                logger.info(
+                    "Writing local GLB (and optional preview) after remote upload; "
+                    "this tessellates again and may take a while; "
+                    "pass --no-cache to skip updating the GLB cache for a fast exit after remote."
+                )
             glb_data = _assembly_to_glb_bytes(assy, config)
             cache_path_w = (
                 Path(cache_path) if not isinstance(cache_path, Path) else cache_path
@@ -575,22 +631,7 @@ def render_part(
             if want_glb_for_mesh:
                 _maybe_export_mesh_from_glb(glb_data, config)
 
-        if yacv is not None:
-            if yacv.server_thread is None:
-                yacv.start()
-            logger.info("Server started. View %s in the web interface.", name)
-            if yacv.server is not None:
-                logger.info(
-                    "Server URL: http://%s:%s",
-                    yacv.server.server_name,
-                    yacv.server.server_port,
-                )
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                logger.info("Shutting down server...")
-                yacv.stop()
+        _exit_if_remote_viewer_idle(config, did_followup_glb_work=did_followup)
         return
 
     # Part is a solid/workplane
@@ -724,13 +765,21 @@ def render_part(
         )
         sys.exit(2)
 
-    # Display path (no export): show solid only when server is active.
-    if show is not None:
-        show(solid, names=name)
+    # Display path (no export): browser preview when viewer is enabled.
+    if use_viewer:
+        _cadquery_web_viewer_show(config, name, solid)
 
     want_glb_for_cache = cache_path is not None and not getattr(config, "no_cache", False)
     want_glb_for_mesh = getattr(getattr(config, "mesh", None), "filepath", None) is not None
+    did_followup = False
     if cache_path is not None and (want_glb_for_cache or want_glb_for_mesh):
+        did_followup = True
+        if use_viewer and getattr(config, "viewer_server_type", None) == "remote":
+            logger.info(
+                "Writing local GLB cache after remote upload; "
+                "this tessellates again and may take a while; "
+                "pass --no-cache to skip updating the GLB cache for a fast exit after remote."
+            )
         glb_bytes = _solid_to_glb_bytes(
             solid,
             config=config,
@@ -750,22 +799,7 @@ def render_part(
         if want_glb_for_mesh:
             _maybe_export_mesh_from_glb(glb_bytes, config)
 
-    if yacv is not None:
-        if yacv.server_thread is None:
-            yacv.start()
-        logger.info("Server started. View %s in the web interface.", name)
-        if yacv.server is not None:
-            logger.info(
-                "Server URL: http://%s:%s",
-                yacv.server.server_name,
-                yacv.server.server_port,
-            )
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            logger.info("Shutting down server...")
-            yacv.stop()
+    _exit_if_remote_viewer_idle(config, did_followup_glb_work=did_followup)
 
 
 def build_tube_from_path(path, config, aux=None, face_kwargs: Optional[dict] = None):
@@ -794,9 +828,17 @@ def build_tube_from_path(path, config, aux=None, face_kwargs: Optional[dict] = N
         ridge_spacing = dr['ridge_spacing']
         ridge_depth = dr['ridge_depth']
 
+        n_samples = len(samples)
+        logger.debug(
+            "build_tube_from_path (led_circle_diffusion_pyramids): building %d section faces, "
+            "path_length=%.2f mm",
+            n_samples,
+            path_length,
+        )
+
         faces = []
         min_ridge = max(0.5, ridge_depth * 0.2)
-        for sample in samples:
+        for idx, sample in enumerate(samples):
             t = sample['t']
             ridge_height = max(
                 min_ridge,
@@ -814,7 +856,23 @@ def build_tube_from_path(path, config, aux=None, face_kwargs: Optional[dict] = N
             from cadquery.func import compound
             face_i = compound(sorted_faces)
             faces.append(face_i)
+            step = max(1, n_samples // 10)
+            if (
+                n_samples <= 20
+                or idx == 0
+                or idx == n_samples - 1
+                or (idx + 1) % step == 0
+            ):
+                logger.debug(
+                    "build_tube_from_path (led_circle_diffusion_pyramids): face %d/%d",
+                    idx + 1,
+                    n_samples,
+                )
 
+        logger.debug(
+            "build_tube_from_path (led_circle_diffusion_pyramids): calling sweep (%d faces)",
+            len(faces),
+        )
         try:
             return sweep(faces, path, aux=aux)
         except Exception as e:
@@ -843,8 +901,16 @@ def build_tube_from_path(path, config, aux=None, face_kwargs: Optional[dict] = N
         )
         base_radius = config.tube_settings.outer_radius
 
+        n_sections = len(samples)
+        logger.debug(
+            "build_tube_from_path (solid_circle_pyramid): building %d section faces, "
+            "path_length=%.2f mm",
+            n_sections,
+            path_length,
+        )
+
         faces = []
-        for sample in samples:
+        for idx, sample in enumerate(samples):
             t = sample['t']
             bulge = _pyramid_ridge_height_at_t(t, path_length, ridge_width, ridge_spacing, ridge_depth)
             radius = base_radius + bulge
@@ -856,14 +922,33 @@ def build_tube_from_path(path, config, aux=None, face_kwargs: Optional[dict] = N
             plane = Plane(origin=sample['point'], normal=sample['tangent'])
             face_i = face_i.moved(Location(plane))
             faces.append(face_i)
+            step = max(1, n_sections // 10)
+            if (
+                n_sections <= 20
+                or idx == 0
+                or idx == n_sections - 1
+                or (idx + 1) % step == 0
+            ):
+                logger.debug(
+                    "build_tube_from_path (solid_circle_pyramid): face %d/%d",
+                    idx + 1,
+                    n_sections,
+                )
 
+        logger.debug(
+            "build_tube_from_path (solid_circle_pyramid): calling sweep (%d faces)",
+            len(faces),
+        )
         return sweep(faces, path, aux=aux)
 
     if face_type == 'led_circle':
+        logger.debug("build_tube_from_path (led_circle): calling sweep (single profile)")
         return sweep(create_led_circle_face(**face_kw), path, aux=aux)
     if face_type == 'solid_circle':
+        logger.debug("build_tube_from_path (solid_circle): calling sweep (single profile)")
         return sweep(create_solid_circle_face(**face_kw), path, aux=aux)
     if face_type == 'square':
+        logger.debug("build_tube_from_path (square): calling sweep (single profile)")
         return sweep(create_square_face(**face_kw), path, aux=aux)
 
     raise ValueError(f"Unknown face_type: {face_type!r}")
@@ -930,11 +1015,11 @@ def draw_part(path, config, aux=None, **face_kwargs):
     Otherwise, uses cache when available (unless --no-cache); on cache hit skips the sweep.
     With --only-cache, only renders if a cached GLB exists; does not sweep on cache miss.
     When --preview is set, always builds (sweeps) to produce STL for the preview image.
-    Sweep is called at most once per invocation.
+    With max_print_bounds enabled, sweeps once per printable segment; otherwise one sweep.
 
     Args:
         path: CadQuery Wire or Edge representing the sweep path
-        config: Config object with tube_settings, export, server, name, no_cache, only_cache
+        config: Config object with tube_settings, export, viewer_enabled, name, no_cache, only_cache
         aux: Optional auxiliary path for sweep orientation
         **face_kwargs: Additional keyword arguments to pass to the face creation function
                        (e.g., rotation_z). orient_to_path is set automatically.
@@ -973,7 +1058,7 @@ def draw_part(path, config, aux=None, **face_kwargs):
 
     # We need geometry once (export, preview, or cache miss).
     logger.debug("Sweeping and rendering.")
-    if getattr(config.max_print_bounds, "enabled", False):
+    if config.max_print_bounds.enabled:
         result = build_segmented_tube_assembly(
             path,
             config,

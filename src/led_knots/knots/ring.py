@@ -44,7 +44,7 @@ knot_points = scale_pyknot_points(
 )
 
 # Open path (closed path causes face overlap)
-path = spline(knot_points[:-1])
+path = spline(knot_points[:-10])
 
 # Create, sweep, and render the part
 draw_part(path, config, rotation_z=0.0)

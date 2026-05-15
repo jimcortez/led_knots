@@ -6,9 +6,14 @@
 # Output bounds: bounding box for knot path scaling
 # -----------------------------------------------------------------------------
 output_bounds:
-  width: 400    # mm
-  length: 400   # mm
-  height: 120     # mm
+  #width: 400    # mm
+  #length: 400   # mm
+  #height: 120     # mm
+
+  # Elegoo Saturn 4 Ultra 16k build volume
+  width: 200    # mm
+  length: 110   # mm
+  height: 200     # mm
 
 # Active cross-section face: led_circle | led_circle_diffusion_pyramids |
 # solid_circle | solid_circle_pyramid | square
@@ -22,7 +27,7 @@ face_settings:
 
   led_circle:
     outer_diameter: 30      # mm – tube outer diameter
-    wall_thickness: 3.0     # mm – outer ring wall thickness
+    wall_thickness: 4.0     # mm – outer ring wall thickness
     rect_inner_x: 4.6       # mm – inner cavity X (e.g. strip height×2 + tolerance)
     rect_inner_y: 11.0      # mm – inner cavity Y (e.g. strip width + tolerance)
     oval_wall_thickness: 0.5   # mm – wall around oval cavity
@@ -75,7 +80,7 @@ path:
 # Print segmentation (optional): split oversized knots into printable segments
 # -----------------------------------------------------------------------------
 max_print_bounds:
-  enabled: true
+  enabled: false
   width: 200                # mm – printer X build size
   length: 200               # mm – printer Y build size
   height: 100               # mm – printer Z build size
@@ -131,10 +136,28 @@ clamp:
   alignment_notch_clearance_mm: 0.1  # mm – clearance for easy assembly
 
 # -----------------------------------------------------------------------------
-# Server (cache, optional yacv overrides)
+# Server (GLB cache + cadquery-web-viewer)
 # -----------------------------------------------------------------------------
 server:
   object_cache: cache/glb_blobs   # directory path
+  # Optional styling / protocol (see cadquery-web-viewer docs → CADQUERY_WEB_VIEWER_*):
+  # protocol: HTTP
+  # texture: "data:image/png;base64,..."
+  # color_faces: "#ffbf00"
+  # color_edges: "#1a1aff"
+  # color_vertices: "#1a1a1a"
+  viewer:
+    mode: remote
+    # off | embedded | remote — remote: POST to a running `cadquery-web-viewer` server
+    embedded:
+      host: 127.0.0.1
+      port: 32323
+      open_browser: true
+      wait_for_first_client: false
+      block_until_disconnect: false
+    remote:
+      host: localhost
+      port: 32323
 
 # -----------------------------------------------------------------------------
 # Export (3D file output)

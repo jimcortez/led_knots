@@ -16,7 +16,7 @@ LED Knots creates parametric 3D models of various mathematical knots and paths, 
 - **Diffusion ridges**: Optional triangular ridges on the oval surface for enhanced light diffusion and visual effects
 - **Flexible orientation control**: Advanced path curvature analysis and twist optimization
 - **Multiple export formats**: STL, STEP, 3MF, GLB/GLTF support
-- **Web-based preview**: Optional yacv-server integration for browser-based 3D viewing
+- **Web-based preview**: Optional [cadquery-web-viewer](https://pypi.org/project/cadquery-web-viewer/) integration (embedded Flask thread or HTTP to a long-running server)
 - **GLB cache**: Cached previews by path and config so repeated viewing is fast; optional `--no-cache` and `--only-cache` flags
 
 ## Installation
@@ -35,11 +35,11 @@ pip install -e .
 
 ### Dependencies
 
-- Python 3.13+
+- Python 3.12 (required by `cadquery-web-viewer`; see `requires-python` in `pyproject.toml`)
 - CadQuery 2.6.1+
 - NumPy
 - pyknotid (for mathematical knot generation)
-- yacv-server (for 3D visualization)
+- cadquery-web-viewer (browser 3D preview; optional at runtime unless you use `--server` / `--viewer`)
 
 ## Quick Start
 
@@ -50,11 +50,15 @@ Each knot type can be run as a standalone script. Export to a file, or view in t
 python -m led_knots.knots.trefoil --export trefoil.stl
 # or, if installed: led-knots-trefoil --export trefoil.stl
 
-# View in the default viewer (uses cache when available)
+# Build and refresh GLB cache (headless; no browser unless viewer flags below)
 python -m led_knots.knots.trefoil
 
-# Start the yacv web server and view in your browser
+# Browser preview: default config uses remote — start the viewer server first
+#   cadquery-web-viewer --host localhost --port 32323
 python -m led_knots.knots.trefoil --server
+
+# In-process embedded viewer (opens a local tab)
+python -m led_knots.knots.trefoil --viewer embedded
 ```
 
 ### Available commands
@@ -80,12 +84,13 @@ All knot commands accept the same options:
 |--------|-------------|
 | `--export FILEPATH` | Export the model to a file. Supported formats: `.stl`, `.step`, `.stp`, `.3mf`, `.glb`, `.gltf` |
 | `--output-mesh FILEPATH` | Export a simulation-focused mesh using trimesh. Currently only `.obj` is supported and is tuned for physics engines like Genesis (meters, watertightness, optional decimation). |
-| `--server` | Start the yacv web server and open the model in your browser |
+| `--server` | Enable browser preview using `server.viewer` from `config.yaml` (legacy alias; prefer `--viewer`) |
+| `--viewer MODE` | `off`, `embedded`, `embedded-block`, or `remote` (overrides `server.viewer.mode` when set) |
 | `-v`, `--verbose` | Enable debug-level logging |
 | `--no-cache` | Always rebuild the 3D model from the path; never use or update the GLB cache |
 | `--only-cache` | Only show the model if a cached GLB exists; skip building if not (useful for quick previews) |
 
-When you omit `--export` and `--server`, the model is shown in the default viewer. Use `--server` to keep a local web server running for browser-based viewing.
+When you omit `--export` and any viewer flag (`--server` / `--viewer` not enabling preview), the knot still builds and can update the GLB cache headlessly. Use `--server` or `--viewer …` to send the model to **cadquery-web-viewer** (remote server or embedded).
 
 ## Configuration
 
@@ -95,27 +100,39 @@ LED Knots uses a centralized configuration system via `config.yaml` in the proje
 - **face_type**: Top-level key selecting the cross-section face (e.g. `led_circle`, `square`)
 - **Face settings**: Per-face options keyed by face name: `outer_diameter` or `outer_width` (for square), `wall_thickness` (e.g. in led_circle), `rect_inner_x` / `rect_inner_y` (led_circle cavity, with comments referencing original strip values), oval/connector/diffusion options. Use `inherit_from` to inherit from another face and override keys.
 - **Path**: `min_90_degree_twist_distance` (mm) for twist rate limits along the path
-- **Server**: Object cache location and optional yacv-server options (host, port, colors, etc.)
+- **Server**: GLB cache location, `server.viewer` (embedded vs remote), and optional styling keys mapped to `CADQUERY_WEB_VIEWER_*` environment variables (`protocol`, `texture`, `color_faces`, `color_edges`, `color_vertices`)
 - **Export settings**: Export tolerances for 3D file formats
 
-### Server and cache
+### Server, cache, and browser viewer
 
-The **server** section in `config.yaml` configures where GLB previews are cached and how the yacv web viewer behaves:
+The **server** section configures the GLB cache and [cadquery-web-viewer](https://github.com/jimcortez/cadquery-web-viewer) behavior:
 
 ```yaml
 server:
-  object_cache: 'cache/glb_blobs'   # Folder for cached GLB files (created automatically)
-  # Optional overrides for yacv-server (uncomment to use):
-  # host: 'localhost'
-  # port: 32323
+  object_cache: 'cache/glb_blobs'
+  # Optional styling (applied as CADQUERY_WEB_VIEWER_* before import):
+  # protocol: HTTP
+  # texture: "data:image/png;base64,..."
   # color_faces: '#ffbf00'
   # color_edges: '#1a1aff'
   # color_vertices: '#1a1a1a'
-  # disable_server: false
+  viewer:
+    mode: remote          # off | embedded | remote
+    embedded:
+      host: 127.0.0.1
+      port: 32323
+      open_browser: true
+      wait_for_first_client: false
+      block_until_disconnect: false
+    remote:
+      host: localhost
+      port: 32323
 ```
 
-- **object_cache**: Directory (relative to the project root) where built GLB models are stored. When you view a knot without `--export`, a hash of the path and settings is used as the filename; if that file exists, it is loaded instead of rebuilding. This speeds up repeated previews. The folder is created on first run if it does not exist.
-- **yacv overrides**: Any option you set here (e.g. `host`, `port`, `color_faces`) is applied as the corresponding `YACV_*` environment variable before the viewer starts, so you can customize the server without editing shell env by hand.
+- **object_cache**: Directory (relative to the project root) for cached GLB files. When you run a knot without `--export`, a hash of the path and settings names the cache file; if it exists, it can be loaded instead of rebuilding.
+- **viewer.mode `remote`**: Each knot run POSTs the model to `http://<remote.host>:<remote.port>`; run `cadquery-web-viewer` (or `python -m cadquery_web_viewer`) in another terminal first. Unless you pass **`--no-cache`**, the CLI still **re-tessellates once** afterward to refresh the on-disk GLB cache (the remote server already has a copy from the upload). That second pass can be slow and may not respond to Ctrl+C until OCP returns to Python; use `--no-cache` for “upload only, then exit immediately.”
+- **viewer.mode `embedded`**: The viewer starts an in-process Flask server when you call `show()`; use `embedded-block` / `block_until_disconnect: true` for the “wait until you close the tab” workflow.
+- **Styling keys** at the `server` level set `CADQUERY_WEB_VIEWER_*` so defaults match your project without exporting shell variables by hand.
 
 Cache is **not** used when you pass `--export`: the model is always built from the path and then exported. Use `--no-cache` to force a full rebuild even when only viewing, and `--only-cache` to only open a previously cached GLB (no build).
 

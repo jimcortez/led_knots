@@ -320,41 +320,59 @@ class TubeSettings:
         return base_kwargs
 
 
-class ServerSettings:
-    """Server and yacv-related configuration. Optional keys map to YACV_* env vars."""
+class ViewerSettings:
+    """cadquery-web-viewer options from ``server.viewer`` in YAML."""
 
-    # Attribute name -> YACV env var name
+    _VALID_MODES = frozenset({'off', 'embedded', 'remote'})
+
+    def __init__(self, data: Dict[str, Any]):
+        d = data or {}
+        mode = str(d.get('mode', 'remote')).strip().lower()
+        if mode not in self._VALID_MODES:
+            raise ValueError(
+                "server.viewer.mode must be one of %r (got %r)"
+                % (sorted(self._VALID_MODES), mode)
+            )
+        self.mode = mode
+        emb = d.get('embedded') or {}
+        self.embedded_host = str(emb.get('host', '127.0.0.1'))
+        self.embedded_port = int(emb.get('port', 32323))
+        self.embedded_open_browser = bool(emb.get('open_browser', True))
+        self.embedded_wait_for_first_client = bool(emb.get('wait_for_first_client', False))
+        self.embedded_block_until_disconnect = bool(emb.get('block_until_disconnect', False))
+        rem = d.get('remote') or {}
+        self.remote_host = str(rem.get('host', 'localhost'))
+        self.remote_port = int(rem.get('port', 32323))
+        ut = rem.get('upload_timeout')
+        self.remote_upload_timeout = float(ut) if ut is not None else 300.0
+        pt = rem.get('post_timeout')
+        self.remote_post_timeout = float(pt) if pt is not None else 60.0
+
+
+class ServerSettings:
+    """GLB cache directory and optional cadquery-web-viewer styling env vars."""
+
+    # YAML attribute -> CADQUERY_WEB_VIEWER_* (read by cadquery_web_viewer.engine)
     _ENV_MAP = {
-        'protocol': 'YACV_PROTOCOL',
-        'texture': 'YACV_TEXTURE',
-        'color_faces': 'YACV_COLOR_FACES',
-        'color_edges': 'YACV_COLOR_EDGES',
-        'color_vertices': 'YACV_COLOR_VERTICES',
-        'graceful_secs_connect': 'YACV_GRACEFUL_SECS_CONNECT',
-        'graceful_secs_work': 'YACV_GRACEFUL_SECS_WORK',
-        'host': 'YACV_HOST',
-        'port': 'YACV_PORT',
-        'disable_server': 'YACV_DISABLE_SERVER',
+        'protocol': 'CADQUERY_WEB_VIEWER_PROTOCOL',
+        'texture': 'CADQUERY_WEB_VIEWER_TEXTURE',
+        'color_faces': 'CADQUERY_WEB_VIEWER_COLOR_FACES',
+        'color_edges': 'CADQUERY_WEB_VIEWER_COLOR_EDGES',
+        'color_vertices': 'CADQUERY_WEB_VIEWER_COLOR_VERTICES',
     }
 
     def __init__(self, data: Dict[str, Any], project_root: Path):
         self.object_cache = str(data.get('object_cache', 'cache/glb_blobs'))
         self.cache_dir = project_root / self.object_cache
-        # Optional yacv env overrides (snake_case in YAML)
         self.protocol = data.get('protocol')
         self.texture = data.get('texture')
         self.color_faces = data.get('color_faces')
         self.color_edges = data.get('color_edges')
         self.color_vertices = data.get('color_vertices')
-        self.graceful_secs_connect = data.get('graceful_secs_connect')
-        self.graceful_secs_work = data.get('graceful_secs_work')
-        self.host = data.get('host')
-        self.port = data.get('port')
-        _disable = data.get('disable_server')
-        self.disable_server = str(_disable).lower() in ('true', '1', 'yes') if _disable is not None else None
+        self.viewer = ViewerSettings(data.get('viewer'))
 
     def apply_to_env(self) -> None:
-        """Set YACV_* environment variables for any non-None attributes."""
+        """Set CADQUERY_WEB_VIEWER_* environment variables for any non-None styling/protocol keys."""
         for attr, env_name in self._ENV_MAP.items():
             val = getattr(self, attr, None)
             if val is not None:
@@ -466,7 +484,7 @@ class Config:
         # Parse command line arguments
         args = parse_args(description=description or "Create and render a knot model")
         
-        # Server settings (cache dir, optional yacv env)
+        # Server settings (GLB cache dir, viewer + optional CADQUERY_WEB_VIEWER_* styling)
         server_data = config_data.get('server', {})
         self.server_settings = ServerSettings(server_data, project_root)
         self.server_settings.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -486,6 +504,7 @@ class Config:
         
         # Store other command line arguments as properties
         self.server = args.server
+        self._init_viewer_from_args(args)
         self.no_cache = args.no_cache
         self.only_cache = args.only_cache
         self.preview_filepath = args.preview
@@ -493,7 +512,65 @@ class Config:
         self.export_parts = getattr(args, "export_parts", None)
         self.export_parts_dir = getattr(args, "export_parts_dir", None)
         self.name = name  # Name of the part (used for export/display)
-    
+
+    def _init_viewer_from_args(self, args) -> None:
+        """
+        Resolve cadquery-web-viewer usage from ``--viewer`` / ``--server`` and YAML ``server.viewer``.
+        Sets: viewer_enabled, viewer_server_type, viewer_block_until_disconnect,
+        viewer_server_options, viewer_remote_options.
+        """
+        v = getattr(args, 'viewer', None)
+        vs = self.server_settings.viewer
+
+        if v == 'off':
+            self.viewer_enabled = False
+        elif v in ('embedded', 'embedded-block', 'remote'):
+            self.viewer_enabled = True
+        elif bool(getattr(args, 'server', False)):
+            self.viewer_enabled = True
+        else:
+            self.viewer_enabled = False
+
+        if not self.viewer_enabled:
+            self.viewer_server_type: Optional[str] = None
+            self.viewer_block_until_disconnect = False
+            self.viewer_server_options = None
+            self.viewer_remote_options = None
+            return
+
+        if v in ('embedded', 'embedded-block'):
+            yaml_mode = 'embedded'
+            block = v == 'embedded-block'
+        elif v == 'remote':
+            yaml_mode = 'remote'
+            block = False
+        else:
+            # ``--server`` with no ``--viewer`` (or future defaults): YAML ``server.viewer.mode``
+            yaml_mode = vs.mode if vs.mode != 'off' else 'embedded'
+            block = yaml_mode == 'embedded' and vs.embedded_block_until_disconnect
+
+        if yaml_mode == 'remote':
+            self.viewer_server_type = 'remote'
+            self.viewer_block_until_disconnect = False
+            self.viewer_server_options = None
+            self.viewer_remote_options = {
+                'host': vs.remote_host,
+                'port': vs.remote_port,
+                'upload_timeout': vs.remote_upload_timeout,
+                'post_timeout': vs.remote_post_timeout,
+            }
+        else:
+            self.viewer_server_type = 'in-process'
+            self.viewer_block_until_disconnect = block
+            self.viewer_server_options = {
+                'host': vs.embedded_host,
+                'port': vs.embedded_port,
+                'open_browser': vs.embedded_open_browser,
+                'wait_for_first_client': vs.embedded_wait_for_first_client,
+                'wait_for_client_timeout': 120.0,
+            }
+            self.viewer_remote_options = None
+
     @staticmethod
     def _merge_dicts(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
         """Recursively merge override dict into base dict."""
@@ -522,8 +599,8 @@ def get_config(
         description: Optional description for the argument parser. 
                      If provided, will be used when parsing command line arguments.
         name: Optional name of the part (used for export/display).
-        set_env_vars: If True (default), set YACV_* environment variables from
-                      server config so yacv_server sees them when later imported.
+        set_env_vars: If True (default), set CADQUERY_WEB_VIEWER_* environment variables from
+                      server config before ``cadquery_web_viewer`` is imported.
     
     Returns:
         Config: The global configuration instance with parsed command line arguments.
