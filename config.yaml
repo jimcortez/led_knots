@@ -136,10 +136,9 @@ clamp:
   alignment_notch_clearance_mm: 0.1  # mm – clearance for easy assembly
 
 # -----------------------------------------------------------------------------
-# Server (GLB cache + cadquery-web-viewer)
+# Server (cadquery-web-viewer)
 # -----------------------------------------------------------------------------
 server:
-  object_cache: cache/glb_blobs   # directory path
   # Optional styling / protocol (see cadquery-web-viewer docs → CADQUERY_WEB_VIEWER_*):
   # protocol: HTTP
   # texture: "data:image/png;base64,..."

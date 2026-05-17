@@ -14,8 +14,8 @@ from .utils import (
     draw_part,
     build_tube_from_path,
     maybe_export_named_parts,
-    scale_pyknot_points,
 )
+from .pyknot_utils import scale_pyknot_points
 from .path_utils import (
     sample_path_curvature,
     sample_path_for_profiles,

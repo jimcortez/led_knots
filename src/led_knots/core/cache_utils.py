@@ -1,7 +1,7 @@
 """
-Cache key utilities for GLB object cache.
+Cache key utilities for preview STL paths.
 
-Builds deterministic cache filename stems from part name, path geometry,
+Builds deterministic filename stems from part name, path geometry,
 rotation/face kwargs, and config (output_bounds, tube_settings, path_settings).
 """
 
@@ -109,32 +109,31 @@ def config_settings_hash(config) -> str:
     out['path_settings'] = {
         'min_90_degree_twist_distance': _round_for_hash(ps.min_90_degree_twist_distance),
     }
-    mp = getattr(config, "max_print_bounds", None)
-    if mp is not None:
-        out["max_print_bounds"] = {
-            "enabled": bool(mp.enabled),
-            "width": _round_for_hash(mp.width),
-            "length": _round_for_hash(mp.length),
-            "height": _round_for_hash(mp.height),
-            "clearance_mm": _round_for_hash(mp.clearance_mm),
-            "max_segments": int(mp.max_segments),
-            "layout_gap_mm": _round_for_hash(mp.layout_gap_mm),
-            "path_samples": int(mp.path_samples),
-            "joint": {
-                "enabled": bool(mp.joint.enabled),
-                "style": str(mp.joint.style),
-                "clearance_mm": _round_for_hash(mp.joint.clearance_mm),
-                "close_loop": bool(mp.joint.close_loop),
-                "pin_diameter_mm": _round_for_hash(mp.joint.pin_diameter_mm),
-                "pin_depth_mm": _round_for_hash(mp.joint.pin_depth_mm),
-                "pin_radial_offset_mm": _round_for_hash(mp.joint.pin_radial_offset_mm),
-                "pin_spacing_mm": _round_for_hash(mp.joint.pin_spacing_mm),
-                "neck_width_mm": _round_for_hash(mp.joint.neck_width_mm),
-                "base_width_mm": _round_for_hash(mp.joint.base_width_mm),
-                "depth_mm": _round_for_hash(mp.joint.depth_mm),
-                "flank_angle_deg": _round_for_hash(mp.joint.flank_angle_deg),
-            },
-        }
+    mp = config.max_print_bounds
+    out["max_print_bounds"] = {
+        "enabled": bool(mp.enabled),
+        "width": _round_for_hash(mp.width),
+        "length": _round_for_hash(mp.length),
+        "height": _round_for_hash(mp.height),
+        "clearance_mm": _round_for_hash(mp.clearance_mm),
+        "max_segments": int(mp.max_segments),
+        "layout_gap_mm": _round_for_hash(mp.layout_gap_mm),
+        "path_samples": int(mp.path_samples),
+        "joint": {
+            "enabled": bool(mp.joint.enabled),
+            "style": str(mp.joint.style),
+            "clearance_mm": _round_for_hash(mp.joint.clearance_mm),
+            "close_loop": bool(mp.joint.close_loop),
+            "pin_diameter_mm": _round_for_hash(mp.joint.pin_diameter_mm),
+            "pin_depth_mm": _round_for_hash(mp.joint.pin_depth_mm),
+            "pin_radial_offset_mm": _round_for_hash(mp.joint.pin_radial_offset_mm),
+            "pin_spacing_mm": _round_for_hash(mp.joint.pin_spacing_mm),
+            "neck_width_mm": _round_for_hash(mp.joint.neck_width_mm),
+            "base_width_mm": _round_for_hash(mp.joint.base_width_mm),
+            "depth_mm": _round_for_hash(mp.joint.depth_mm),
+            "flank_angle_deg": _round_for_hash(mp.joint.flank_angle_deg),
+        },
+    }
     blob = str(sorted(out.items()))
     return hashlib.sha256(blob.encode()).hexdigest()[:_PATH_HASH_DIGEST_LEN]
 
@@ -149,7 +148,7 @@ def cache_key_for_part(
     """
     Build the cache filename stem: slug(name)-slug(rotation_params)-config_hash-path_hash.
     Includes output_bounds, tube_settings, and path_settings when config is provided.
-    Used as the base for cache_path (e.g. cache_dir / f"{cache_key_for_part(...)}.glb").
+    Used as the base for preview STL paths (e.g. preview_cache_dir / f"{stem}.stl").
     """
     name_slug = slugify(name or "knot")
     rot_slug = rotation_params_string(face_kwargs or {})
@@ -164,34 +163,6 @@ def cache_key_for_part(
     return "-".join(p for p in parts if p)
 
 
-def cache_path_for_part(
-    config: Any,
-    path,
-    aux=None,
-    face_kwargs: Optional[Dict[str, Any]] = None,
-) -> Optional[Path]:
-    """
-    Derive the cache file path for a part from config and path/aux/face_kwargs.
-
-    Returns cache_dir / f"{cache_key_for_part(...)}.glb" when config has a
-    cache_dir, otherwise None. Use this so callers do not need to compute
-    cache_path manually before calling render_part().
-    """
-    cache_dir = getattr(
-        getattr(config, "server_settings", None), "cache_dir", None
-    )
-    if cache_dir is None:
-        return None
-    stem = cache_key_for_part(
-        config.name,
-        path,
-        aux=aux,
-        face_kwargs=face_kwargs,
-        config=config,
-    )
-    return Path(cache_dir) / f"{stem}.glb"
-
-
 def preview_stl_path_for_part(
     config: Any,
     path,
@@ -204,11 +175,7 @@ def preview_stl_path_for_part(
     Returns preview_cache_dir / f"{stem}.stl" using the same stem as cache_key_for_part.
     Used when --preview is set and the STL source is the preview cache (not --export .stl).
     """
-    preview_cache_dir = getattr(
-        getattr(config, "preview_settings", None), "preview_cache_dir", None
-    )
-    if preview_cache_dir is None:
-        return None
+    preview_cache_dir = config.preview_settings.preview_cache_dir
     stem = cache_key_for_part(
         config.name,
         path,

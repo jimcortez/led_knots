@@ -350,7 +350,7 @@ class ViewerSettings:
 
 
 class ServerSettings:
-    """GLB cache directory and optional cadquery-web-viewer styling env vars."""
+    """cadquery-web-viewer styling env vars and viewer connection settings."""
 
     # YAML attribute -> CADQUERY_WEB_VIEWER_* (read by cadquery_web_viewer.engine)
     _ENV_MAP = {
@@ -361,9 +361,7 @@ class ServerSettings:
         'color_vertices': 'CADQUERY_WEB_VIEWER_COLOR_VERTICES',
     }
 
-    def __init__(self, data: Dict[str, Any], project_root: Path):
-        self.object_cache = str(data.get('object_cache', 'cache/glb_blobs'))
-        self.cache_dir = project_root / self.object_cache
+    def __init__(self, data: Dict[str, Any], _project_root: Path):
         self.protocol = data.get('protocol')
         self.texture = data.get('texture')
         self.color_faces = data.get('color_faces')
@@ -484,11 +482,9 @@ class Config:
         # Parse command line arguments
         args = parse_args(description=description or "Create and render a knot model")
         
-        # Server settings (GLB cache dir, viewer + optional CADQUERY_WEB_VIEWER_* styling)
+        # Server settings (viewer + optional CADQUERY_WEB_VIEWER_* styling)
         server_data = config_data.get('server', {})
         self.server_settings = ServerSettings(server_data, project_root)
-        self.server_settings.cache_dir.mkdir(parents=True, exist_ok=True)
-        logger.debug("Cache directory: %s", self.server_settings.cache_dir)
         
         # Initialize export settings with command line filepath
         self.export = ExportSettings(config_data.get('export', {}), filepath=args.export)
@@ -505,8 +501,6 @@ class Config:
         # Store other command line arguments as properties
         self.server = args.server
         self._init_viewer_from_args(args)
-        self.no_cache = args.no_cache
-        self.only_cache = args.only_cache
         self.preview_filepath = args.preview
         # Optional multi-part export (e.g., assembly vs individual parts)
         self.export_parts = getattr(args, "export_parts", None)

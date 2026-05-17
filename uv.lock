@@ -291,7 +291,7 @@ wheels = [
 
 [[package]]
 name = "cadquery-web-viewer"
-version = "2.0.0"
+version = "1.1.1"
 source = { editable = "../yet-another-cad-viewer" }
 dependencies = [
     { name = "build123d" },

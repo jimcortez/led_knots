@@ -17,7 +17,6 @@ LED Knots creates parametric 3D models of various mathematical knots and paths, 
 - **Flexible orientation control**: Advanced path curvature analysis and twist optimization
 - **Multiple export formats**: STL, STEP, 3MF, GLB/GLTF support
 - **Web-based preview**: Optional [cadquery-web-viewer](https://pypi.org/project/cadquery-web-viewer/) integration (embedded Flask thread or HTTP to a long-running server)
-- **GLB cache**: Cached previews by path and config so repeated viewing is fast; optional `--no-cache` and `--only-cache` flags
 
 ## Installation
 
@@ -50,7 +49,7 @@ Each knot type can be run as a standalone script. Export to a file, or view in t
 python -m led_knots.knots.trefoil --export trefoil.stl
 # or, if installed: led-knots-trefoil --export trefoil.stl
 
-# Build and refresh GLB cache (headless; no browser unless viewer flags below)
+# Build geometry headlessly (no browser unless viewer flags below)
 python -m led_knots.knots.trefoil
 
 # Browser preview: default config uses remote — start the viewer server first
@@ -87,10 +86,8 @@ All knot commands accept the same options:
 | `--server` | Enable browser preview using `server.viewer` from `config.yaml` (legacy alias; prefer `--viewer`) |
 | `--viewer MODE` | `off`, `embedded`, `embedded-block`, or `remote` (overrides `server.viewer.mode` when set) |
 | `-v`, `--verbose` | Enable debug-level logging |
-| `--no-cache` | Always rebuild the 3D model from the path; never use or update the GLB cache |
-| `--only-cache` | Only show the model if a cached GLB exists; skip building if not (useful for quick previews) |
 
-When you omit `--export` and any viewer flag (`--server` / `--viewer` not enabling preview), the knot still builds and can update the GLB cache headlessly. Use `--server` or `--viewer …` to send the model to **cadquery-web-viewer** (remote server or embedded).
+When you omit `--export` and any viewer flag (`--server` / `--viewer` not enabling preview), the knot still builds geometry headlessly. Use `--server` or `--viewer …` to send the model to **cadquery-web-viewer** (remote server or embedded).
 
 ## Configuration
 
@@ -100,16 +97,15 @@ LED Knots uses a centralized configuration system via `config.yaml` in the proje
 - **face_type**: Top-level key selecting the cross-section face (e.g. `led_circle`, `square`)
 - **Face settings**: Per-face options keyed by face name: `outer_diameter` or `outer_width` (for square), `wall_thickness` (e.g. in led_circle), `rect_inner_x` / `rect_inner_y` (led_circle cavity, with comments referencing original strip values), oval/connector/diffusion options. Use `inherit_from` to inherit from another face and override keys.
 - **Path**: `min_90_degree_twist_distance` (mm) for twist rate limits along the path
-- **Server**: GLB cache location, `server.viewer` (embedded vs remote), and optional styling keys mapped to `CADQUERY_WEB_VIEWER_*` environment variables (`protocol`, `texture`, `color_faces`, `color_edges`, `color_vertices`)
+- **Server**: `server.viewer` (embedded vs remote) and optional styling keys mapped to `CADQUERY_WEB_VIEWER_*` environment variables (`protocol`, `texture`, `color_faces`, `color_edges`, `color_vertices`)
 - **Export settings**: Export tolerances for 3D file formats
 
-### Server, cache, and browser viewer
+### Server and browser viewer
 
-The **server** section configures the GLB cache and [cadquery-web-viewer](https://github.com/jimcortez/cadquery-web-viewer) behavior:
+The **server** section configures [cadquery-web-viewer](https://github.com/jimcortez/cadquery-web-viewer) behavior:
 
 ```yaml
 server:
-  object_cache: 'cache/glb_blobs'
   # Optional styling (applied as CADQUERY_WEB_VIEWER_* before import):
   # protocol: HTTP
   # texture: "data:image/png;base64,..."
@@ -129,12 +125,9 @@ server:
       port: 32323
 ```
 
-- **object_cache**: Directory (relative to the project root) for cached GLB files. When you run a knot without `--export`, a hash of the path and settings names the cache file; if it exists, it can be loaded instead of rebuilding.
-- **viewer.mode `remote`**: Each knot run POSTs the model to `http://<remote.host>:<remote.port>`; run `cadquery-web-viewer` (or `python -m cadquery_web_viewer`) in another terminal first. Unless you pass **`--no-cache`**, the CLI still **re-tessellates once** afterward to refresh the on-disk GLB cache (the remote server already has a copy from the upload). That second pass can be slow and may not respond to Ctrl+C until OCP returns to Python; use `--no-cache` for “upload only, then exit immediately.”
+- **viewer.mode `remote`**: Each knot run POSTs the model to `http://<remote.host>:<remote.port>`; run `cadquery-web-viewer` (or `python -m cadquery_web_viewer`) in another terminal first. The CLI exits immediately after upload when there is no `--output-mesh` or `--preview` follow-up (caching is handled by the viewer server).
 - **viewer.mode `embedded`**: The viewer starts an in-process Flask server when you call `show()`; use `embedded-block` / `block_until_disconnect: true` for the “wait until you close the tab” workflow.
 - **Styling keys** at the `server` level set `CADQUERY_WEB_VIEWER_*` so defaults match your project without exporting shell variables by hand.
-
-Cache is **not** used when you pass `--export`: the model is always built from the path and then exported. Use `--no-cache` to force a full rebuild even when only viewing, and `--only-cache` to only open a previously cached GLB (no build).
 
 ### Configuration details
 

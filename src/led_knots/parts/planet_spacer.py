@@ -6,7 +6,6 @@ import cadquery as cq
 from cadquery.func import *  # match project functional API style
 
 from led_knots.core import get_config, render_part
-from led_knots.core.preview import render_stl_to_image
 
 logger = logging.getLogger(__name__)
 
@@ -64,43 +63,8 @@ def build_planet_spacer(
 def main() -> None:
     config = get_config(name="Planet Spacer", description="Create and render a thick washer-like spacer")
     spacer = build_planet_spacer()
-
-    # Preview-only flow: `render_part` supports preview-only for assemblies, but not solids.
-    # Generate an STL with the preview tessellation settings, then render to image.
-    if getattr(config, "preview_filepath", None) is not None and not config.export.filepath:
-        import os
-        import tempfile
-        from pathlib import Path
-
-        tol = config.preview_settings.mesh_tolerance
-        ang_tol = config.preview_settings.mesh_angular_tolerance
-
-        with tempfile.NamedTemporaryFile(suffix=".stl", delete=False) as tf:
-            tmp_stl = tf.name
-        try:
-            cq.exporters.export(
-                spacer,
-                tmp_stl,
-                tolerance=tol,
-                angularTolerance=ang_tol,
-                opt={"ascii": False},
-            )
-            render_stl_to_image(
-                Path(tmp_stl),
-                Path(config.preview_filepath),
-                config.preview_settings,
-            )
-        finally:
-            if os.path.exists(tmp_stl):
-                try:
-                    os.unlink(tmp_stl)
-                except OSError:
-                    pass
-        return
-
     render_part(spacer, config)
 
 
 if __name__ == "__main__":
     main()
-

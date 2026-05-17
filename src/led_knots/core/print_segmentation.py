@@ -60,8 +60,8 @@ def sample_wire_points(path, n_samples: int = 1001):
 
 
 def _joint_margin(config) -> float:
-    mp = getattr(config, "max_print_bounds", None)
-    if mp is None or not mp.enabled or not mp.joint.enabled:
+    mp = config.max_print_bounds
+    if not mp.enabled or not mp.joint.enabled:
         return 0.0
     jc = mp.joint
     if jc.style == "twin_pin":

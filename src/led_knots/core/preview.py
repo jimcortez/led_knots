@@ -158,7 +158,7 @@ def render_glb_to_image(
     """
     Render a GLB file to an image using trimesh, pyrender, and Pillow.
 
-    Uses the cached GLB for preview. Camera and image size come from preview_config.
+    Camera and image size come from preview_config.
     """
     image_path = Path(image_path)
     image_path.parent.mkdir(parents=True, exist_ok=True)

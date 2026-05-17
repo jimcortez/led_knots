@@ -102,8 +102,8 @@ def apply_registration_features(
     - Internal start boundary gets female socket.
     - Internal end boundary gets male key/pin.
     """
-    mp = getattr(config, "max_print_bounds", None)
-    if mp is None or not mp.enabled or not mp.joint.enabled:
+    mp = config.max_print_bounds
+    if not mp.enabled or not mp.joint.enabled:
         return part_obj
 
     shape = _shape_from_any(part_obj)
