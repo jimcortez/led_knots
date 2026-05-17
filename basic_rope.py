@@ -210,14 +210,11 @@ def main():
     result = Compound.makeCompound([tube] + placed_strands)
     
     try:
-        from yacv_server import show
-        show(result, names='braided_rope')
-        print("Exported braided_rope to yacv_server!")
-        import time
-        print("Waiting 60s for frontend requests...")
-        time.sleep(60)
+        from cadquery_web_viewer import show
+        show(result, names='braided_rope', block_until_disconnect=True)
+        print("Displayed braided_rope in cadquery-web-viewer.")
     except ImportError:
-        print("yacv_server not found.")
+        print("cadquery-web-viewer not found.")
 
 
 if __name__ == '__main__':

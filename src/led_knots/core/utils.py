@@ -39,10 +39,30 @@ from .print_segmentation import build_segmented_tube_assembly
 logger = logging.getLogger(__name__)
 
 
+def _viewer_tessellation_kwargs(config) -> Dict[str, float]:
+    """Tessellation options for cadquery-web-viewer ``show`` / ``render`` (preview mesh quality)."""
+    ps = getattr(config, "preview_settings", None)
+    if ps is None:
+        return {}
+    return {
+        "tolerance": float(ps.mesh_tolerance),
+        "angular_tolerance": float(ps.mesh_angular_tolerance),
+    }
+
+
+def _glb_bytes_via_viewer_render(obj, config, name: str) -> bytes:
+    """Tessellate a CAD object to GLB using the same path as cadquery-web-viewer 2.x ``show``."""
+    from cadquery_web_viewer import render
+
+    glbs = render(obj, names=name, **_viewer_tessellation_kwargs(config))
+    return glbs[0]
+
+
 def _cadquery_web_viewer_show(config, name: str, *objs) -> None:
     """Send geometry to cadquery-web-viewer (embedded or remote per config)."""
     from cadquery_web_viewer import show
 
+    tess_kw = _viewer_tessellation_kwargs(config)
     st = config.viewer_server_type
     block = bool(getattr(config, "viewer_block_until_disconnect", False))
     if st == "remote":
@@ -53,6 +73,7 @@ def _cadquery_web_viewer_show(config, name: str, *objs) -> None:
             server_type="remote",
             remote_options=ro,
             block_until_disconnect=False,
+            **tess_kw,
         )
         logger.info(
             "Posted %s to cadquery-web-viewer at http://%s:%s/",
@@ -68,6 +89,7 @@ def _cadquery_web_viewer_show(config, name: str, *objs) -> None:
         server_type="in-process",
         server_options=so,
         block_until_disconnect=block,
+        **tess_kw,
     )
     logger.info(
         "cadquery-web-viewer (%s): http://%s:%s/",
@@ -595,8 +617,10 @@ def render_part(
 
         # No export path: browser preview when viewer is enabled.
         compound = assy.toCompound()
+        viewer_glb: Optional[bytes] = None
         if use_viewer:
-            _cadquery_web_viewer_show(config, name, compound)
+            viewer_glb = _glb_bytes_via_viewer_render(compound, config, name)
+            _cadquery_web_viewer_show(config, name, viewer_glb)
 
         want_glb_for_cache = cache_path is not None and not getattr(config, "no_cache", False)
         want_glb_for_mesh = getattr(getattr(config, "mesh", None), "filepath", None) is not None
@@ -607,13 +631,17 @@ def render_part(
             want_glb_for_cache or want_glb_for_mesh or want_glb_for_preview
         ):
             did_followup = True
-            if use_viewer and getattr(config, "viewer_server_type", None) == "remote":
+            if use_viewer and viewer_glb is None and getattr(config, "viewer_server_type", None) == "remote":
                 logger.info(
                     "Writing local GLB (and optional preview) after remote upload; "
                     "this tessellates again and may take a while; "
                     "pass --no-cache to skip updating the GLB cache for a fast exit after remote."
                 )
-            glb_data = _assembly_to_glb_bytes(assy, config)
+            glb_data = (
+                viewer_glb
+                if viewer_glb is not None
+                else _assembly_to_glb_bytes(assy, config)
+            )
             cache_path_w = (
                 Path(cache_path) if not isinstance(cache_path, Path) else cache_path
             )
@@ -766,27 +794,36 @@ def render_part(
         sys.exit(2)
 
     # Display path (no export): browser preview when viewer is enabled.
+    viewer_glb: Optional[bytes] = None
     if use_viewer:
-        _cadquery_web_viewer_show(config, name, solid)
+        viewer_glb = _glb_bytes_via_viewer_render(solid, config, name)
+        _cadquery_web_viewer_show(config, name, viewer_glb)
 
     want_glb_for_cache = cache_path is not None and not getattr(config, "no_cache", False)
     want_glb_for_mesh = getattr(getattr(config, "mesh", None), "filepath", None) is not None
     did_followup = False
     if cache_path is not None and (want_glb_for_cache or want_glb_for_mesh):
         did_followup = True
-        if use_viewer and getattr(config, "viewer_server_type", None) == "remote":
+        if (
+            use_viewer
+            and viewer_glb is None
+            and getattr(config, "viewer_server_type", None) == "remote"
+        ):
             logger.info(
                 "Writing local GLB cache after remote upload; "
                 "this tessellates again and may take a while; "
                 "pass --no-cache to skip updating the GLB cache for a fast exit after remote."
             )
-        glb_bytes = _solid_to_glb_bytes(
-            solid,
-            config=config,
-            stl_tolerance=config.preview_settings.mesh_tolerance,
-            stl_angular_tolerance=config.preview_settings.mesh_angular_tolerance,
-            stl_ascii=False,
-        )
+        if viewer_glb is not None:
+            glb_bytes = viewer_glb
+        else:
+            glb_bytes = _solid_to_glb_bytes(
+                solid,
+                config=config,
+                stl_tolerance=config.preview_settings.mesh_tolerance,
+                stl_angular_tolerance=config.preview_settings.mesh_angular_tolerance,
+                stl_ascii=False,
+            )
 
         cache_path_w = (
             Path(cache_path) if not isinstance(cache_path, Path) else cache_path

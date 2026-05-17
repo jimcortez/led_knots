@@ -150,10 +150,10 @@ def main():
     result = Compound.makeCompound([core_tube] + strands)
 
     try:
-        from yacv_server import yacv, show
+        from cadquery_web_viewer import show
         show(result, names='tube_rope')
     except ImportError:
-        print("yacv_server not available.")
+        print("cadquery-web-viewer not available.")
 
 
 if __name__ == '__main__':

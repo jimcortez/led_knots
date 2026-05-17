@@ -144,11 +144,11 @@ def main():
         print("Done.")
     else:
         try:
-            from yacv_server import show
+            from cadquery_web_viewer import show
             show(result, names='rope_sim')
-            print("Model dispatched to yacv-server.")
+            print("Model sent to cadquery-web-viewer.")
         except ImportError:
-            print("yacv_server not available. The model was built successfully.")
+            print("cadquery-web-viewer not available. The model was built successfully.")
 
 
 if __name__ == '__main__':

@@ -28,7 +28,7 @@ dependencies = [
     "pyrender>=0.1.45",
     "pyyaml>=6.0",
     "trimesh>=4.0.0",
-    "cadquery-web-viewer>=1.0.1",
+    "cadquery-web-viewer>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -59,6 +59,7 @@ packages = ["src/led_knots"]
 [tool.uv.sources]
 pyknotid = { git = "https://github.com/sashakolpakov/pyknotid.git" }
 py-lib3mf = { git = "https://github.com/jdegenstein/py-lib3mf", tag="v2.4.1.2"}
+cadquery-web-viewer = { path = "../yet-another-cad-viewer", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

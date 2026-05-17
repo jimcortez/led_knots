@@ -194,6 +194,6 @@ else:
 # from cadquery.exporters import export; export(result, "pyramid_ridges.stl")
 # from cadquery.vis import show; show(result)
 
-from yacv_server import yacv, show
+from cadquery_web_viewer import show
 show(result, names='test2')
 

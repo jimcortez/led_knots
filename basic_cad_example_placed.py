@@ -228,11 +228,11 @@ def main():
     # from cadquery.exporters import export; export(result, "pyramids_instanced.stl")
     
     try:
-        from yacv_server import show
+        from cadquery_web_viewer import show
         show(result, names='test_instanced')
-        print("Exported to yacv_server!")
+        print("Displayed in cadquery-web-viewer.")
     except ImportError:
-        print("yacv_server not found. Skipping display.")
+        print("cadquery-web-viewer not found. Skipping display.")
 
 if __name__ == "__main__":
     main()
