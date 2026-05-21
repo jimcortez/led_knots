@@ -11,7 +11,12 @@ import cadquery as cq
 import numpy as np
 from cadquery.func import spline
 
-from .print_joint import apply_registration_features
+from .print_joint import (
+    apply_lap_joint_features,
+    apply_registration_features,
+    extend_segment_points_for_lap,
+    lap_overlap_mm,
+)
 
 
 @dataclass(frozen=True)
@@ -64,9 +69,14 @@ def _joint_margin(config) -> float:
     if not mp.enabled or not mp.joint.enabled:
         return 0.0
     jc = mp.joint
+    outer_r = float(config.tube_settings.outer_radius)
+    radial = outer_r + 0.5 * float(jc.lap_step_height_mm)
     if jc.style == "twin_pin":
-        return max(0.0, float(jc.pin_radial_offset_mm) + 0.5 * float(jc.pin_diameter_mm))
-    return max(0.0, float(jc.pin_radial_offset_mm) + 0.5 * float(jc.base_width_mm))
+        radial = max(radial, outer_r + 0.5 * float(jc.pin_diameter_mm))
+    else:
+        radial = max(radial, outer_r + 0.5 * float(jc.base_width_mm))
+    lap = lap_overlap_mm(jc)
+    return radial + lap
 
 
 def _best_rotation_for_segment(
@@ -185,10 +195,23 @@ def build_segmented_tube_assembly(
 
     plans = plan_segments(sampled_points, config)
     assy = cq.Assembly(name=f"{config.name or 'knot'} segmented")
+    print_bed_layout = config.max_print_bounds.layout == "print_bed"
     cursor_x = 0.0
+
+    lap_mm = lap_overlap_mm(config.max_print_bounds.joint) if config.max_print_bounds.joint.enabled else 0.0
 
     for idx, plan in enumerate(plans):
         seg_pts = sampled_points[plan.start_idx : plan.end_idx + 1]
+        if lap_mm > 0:
+            seg_pts = extend_segment_points_for_lap(
+                seg_pts,
+                sampled_points=sampled_points,
+                start_idx=plan.start_idx,
+                end_idx=plan.end_idx,
+                part_idx=idx,
+                part_count=len(plans),
+                lap_mm=lap_mm,
+            )
         wire_seg = spline(seg_pts)
         aux_seg = None
         if aux_sampled is not None:
@@ -203,6 +226,16 @@ def build_segmented_tube_assembly(
             sampled_points[s], dtype=float
         )
         end_tan = np.array(sampled_points[e], dtype=float) - np.array(sampled_points[max(e - 1, 0)], dtype=float)
+        part_shape = apply_lap_joint_features(
+            part_shape,
+            part_idx=idx,
+            part_count=len(plans),
+            start_point=sampled_points[s],
+            end_point=sampled_points[e],
+            start_tangent=start_tan,
+            end_tangent=end_tan,
+            config=config,
+        )
         part_shape = apply_registration_features(
             part_shape,
             part_idx=idx,
@@ -214,14 +247,18 @@ def build_segmented_tube_assembly(
             config=config,
         )
 
-        rot_shape = _rotate_shape(part_shape, plan.euler_xyz_deg)
-        bb = rot_shape.BoundingBox()
-        x_off = cursor_x - bb.xmin
-        y_off = -bb.ymin
-        z_off = -bb.zmin
-        placed = rot_shape.translate((x_off, y_off, z_off))
+        if print_bed_layout:
+            rot_shape = _rotate_shape(part_shape, plan.euler_xyz_deg)
+            bb = rot_shape.BoundingBox()
+            x_off = cursor_x - bb.xmin
+            y_off = -bb.ymin
+            z_off = -bb.zmin
+            placed = rot_shape.translate((x_off, y_off, z_off))
+            cursor_x = x_off + bb.xlen + float(config.max_print_bounds.layout_gap_mm)
+        else:
+            placed = part_shape
+
         assy = assy.add(placed, name=f"segment_{idx:02d}")
-        cursor_x = x_off + bb.xlen + float(config.max_print_bounds.layout_gap_mm)
 
     return assy
 

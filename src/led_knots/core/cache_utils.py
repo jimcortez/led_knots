@@ -117,6 +117,7 @@ def config_settings_hash(config) -> str:
         "height": _round_for_hash(mp.height),
         "clearance_mm": _round_for_hash(mp.clearance_mm),
         "max_segments": int(mp.max_segments),
+        "layout": str(mp.layout),
         "layout_gap_mm": _round_for_hash(mp.layout_gap_mm),
         "path_samples": int(mp.path_samples),
         "joint": {
@@ -128,6 +129,8 @@ def config_settings_hash(config) -> str:
             "pin_depth_mm": _round_for_hash(mp.joint.pin_depth_mm),
             "pin_radial_offset_mm": _round_for_hash(mp.joint.pin_radial_offset_mm),
             "pin_spacing_mm": _round_for_hash(mp.joint.pin_spacing_mm),
+            "lap_overlap_mm": _round_for_hash(mp.joint.lap_overlap_mm),
+            "lap_step_height_mm": _round_for_hash(mp.joint.lap_step_height_mm),
             "neck_width_mm": _round_for_hash(mp.joint.neck_width_mm),
             "base_width_mm": _round_for_hash(mp.joint.base_width_mm),
             "depth_mm": _round_for_hash(mp.joint.depth_mm),

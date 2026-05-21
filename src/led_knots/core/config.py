@@ -88,6 +88,10 @@ class PrintJointSettings:
         self.pin_radial_offset_mm: float = float(data.get("pin_radial_offset_mm", 17.0))
         self.pin_spacing_mm: float = float(data.get("pin_spacing_mm", 7.0))
 
+        # Axial lap overlap at internal segment cuts (mm along path tangent).
+        self.lap_overlap_mm: float = float(data.get("lap_overlap_mm", 4.0))
+        self.lap_step_height_mm: float = float(data.get("lap_step_height_mm", 3.0))
+
         # dovetail defaults
         self.neck_width_mm: float = float(data.get("neck_width_mm", 3.0))
         self.base_width_mm: float = float(data.get("base_width_mm", 5.0))
@@ -98,6 +102,10 @@ class PrintJointSettings:
             raise ValueError(f"max_print_bounds.joint.style must be 'twin_pin' or 'dovetail' (got {self.style!r})")
         if self.clearance_mm < 0:
             raise ValueError("max_print_bounds.joint.clearance_mm must be >= 0")
+        if self.lap_overlap_mm < 0:
+            raise ValueError("max_print_bounds.joint.lap_overlap_mm must be >= 0")
+        if self.lap_step_height_mm <= 0:
+            raise ValueError("max_print_bounds.joint.lap_step_height_mm must be > 0")
 
         positive_fields = (
             "pin_diameter_mm",
@@ -127,6 +135,7 @@ class MaxPrintBoundsSettings:
         self.height: float = float(data.get("height", 0.0))
         self.clearance_mm: float = float(data.get("clearance_mm", 0.0))
         self.max_segments: int = int(data.get("max_segments", 32))
+        self.layout: str = str(data.get("layout", "path")).strip().lower()
         self.layout_gap_mm: float = float(data.get("layout_gap_mm", 12.0))
         self.path_samples: int = int(data.get("path_samples", 1001))
         self.joint = PrintJointSettings(data.get("joint", {}))
@@ -139,6 +148,8 @@ class MaxPrintBoundsSettings:
                 raise ValueError("max_print_bounds.clearance_mm must be >= 0")
             if self.max_segments < 1:
                 raise ValueError("max_print_bounds.max_segments must be >= 1")
+            if self.layout not in ("path", "print_bed"):
+                raise ValueError("max_print_bounds.layout must be 'path' or 'print_bed'")
             if self.layout_gap_mm < 0:
                 raise ValueError("max_print_bounds.layout_gap_mm must be >= 0")
             if self.path_samples < 8:

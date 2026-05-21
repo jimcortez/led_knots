@@ -6,14 +6,14 @@
 # Output bounds: bounding box for knot path scaling
 # -----------------------------------------------------------------------------
 output_bounds:
-  #width: 400    # mm
-  #length: 400   # mm
-  #height: 120     # mm
+  width: 400    # mm
+  length: 400   # mm
+  height: 350     # mm
 
   # Elegoo Saturn 4 Ultra 16k build volume
-  width: 200    # mm
-  length: 110   # mm
-  height: 200     # mm
+  # width: 200    # mm
+  # length: 110   # mm
+  # height: 200     # mm
 
 # Active cross-section face: led_circle | led_circle_diffusion_pyramids |
 # solid_circle | solid_circle_pyramid | square
@@ -80,23 +80,30 @@ path:
 # Print segmentation (optional): split oversized knots into printable segments
 # -----------------------------------------------------------------------------
 max_print_bounds:
-  enabled: false
-  width: 200                # mm – printer X build size
-  length: 200               # mm – printer Y build size
-  height: 100               # mm – printer Z build size
+  enabled: true
+
+  # Elegoo Saturn 4 Ultra 16k build volume
+  width: 200    # mm
+  length: 110   # mm
+  height: 200     # mm
+
   clearance_mm: 2.0         # mm – subtract from all sides
   max_segments: 32          # safety cap for segmentation
-  layout_gap_mm: 12.0       # mm – spacing between laid-out segments
+  layout: path              # path | print_bed — path keeps segments on the sweep; print_bed lays parts on the build plate
+  layout_gap_mm: 12.0       # mm – spacing between segments (print_bed layout only)
+
   path_samples: 1001        # Wire samples used by segmentation DP
   joint:
-    enabled: false
+    enabled: true
     style: twin_pin         # twin_pin | dovetail
     clearance_mm: 0.2       # mm
     close_loop: false       # add final join for closed loop paths
     pin_diameter_mm: 3.0    # mm
     pin_depth_mm: 4.0       # mm
-    pin_radial_offset_mm: 17.0 # mm (centerline to pin axis)
+    pin_radial_offset_mm: 17.0 # mm (centerline to pin axis; clamped to tube OD if too large)
     pin_spacing_mm: 7.0     # mm (distance between pin centers)
+    lap_overlap_mm: 4.0     # mm – axial overlap at each internal cut (both neighbors extend)
+    lap_step_height_mm: 3.0 # mm – radial rabbet step on the outer wall at each lap
     neck_width_mm: 3.0      # mm (dovetail)
     base_width_mm: 5.0      # mm (dovetail)
     depth_mm: 4.0           # mm (dovetail/pocket depth)
