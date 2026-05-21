@@ -23,13 +23,41 @@ def _shape_from_any(obj):
     return obj
 
 
-def _frame_location(origin_xyz: Tuple[float, float, float], z_dir: np.ndarray, ref_up: np.ndarray) -> cq.Location:
-    z = _unit(z_dir)
-    x = ref_up - np.dot(ref_up, z) * z
+def joint_tangent_at_cut(
+    sampled_points: Sequence[Tuple[float, float, float]],
+    cut_idx: int,
+) -> np.ndarray:
+    """Unit tangent along the path at an internal segment boundary (cut index)."""
+    n = len(sampled_points)
+    if n < 2:
+        return np.array([0.0, 0.0, 1.0], dtype=float)
+    i = int(cut_idx)
+    if i <= 0:
+        p0, p1 = sampled_points[0], sampled_points[1]
+    elif i >= n - 1:
+        p0, p1 = sampled_points[n - 2], sampled_points[n - 1]
+    else:
+        p0, p1 = sampled_points[i - 1], sampled_points[i + 1]
+    return _unit(np.asarray(p1, dtype=float) - np.asarray(p0, dtype=float))
+
+
+def joint_radial_direction(
+    tangent: Sequence[float],
+    ref_up: Sequence[float] = (0.0, 0.0, 1.0),
+) -> np.ndarray:
+    """Unit +X of the joint cut frame: perpendicular to path tangent (registration radial axis)."""
+    z = _unit(np.asarray(tangent, dtype=float))
+    up = np.asarray(ref_up, dtype=float)
+    x = up - np.dot(up, z) * z
     if float(np.linalg.norm(x)) < 1e-9:
         fallback = np.array([1.0, 0.0, 0.0], dtype=float)
         x = fallback - np.dot(fallback, z) * z
-    x = _unit(x)
+    return _unit(x)
+
+
+def _frame_location(origin_xyz: Tuple[float, float, float], z_dir: np.ndarray, ref_up: np.ndarray) -> cq.Location:
+    z = _unit(z_dir)
+    x = joint_radial_direction(z_dir, ref_up)
     plane = cq.Plane(
         origin=cq.Vector(float(origin_xyz[0]), float(origin_xyz[1]), float(origin_xyz[2])),
         xDir=cq.Vector(float(x[0]), float(x[1]), float(x[2])),

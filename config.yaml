@@ -90,7 +90,7 @@ max_print_bounds:
   clearance_mm: 2.0         # mm – subtract from all sides
   max_segments: 32          # safety cap for segmentation
   layout: path              # path | print_bed — path keeps segments on the sweep; print_bed lays parts on the build plate
-  layout_gap_mm: 12.0       # mm – spacing between segments (print_bed layout only)
+  layout_gap_mm: 2      # mm – print_bed: gap along build-plate row (X); path: axial clearance at each internal joint (±half along path tangent)
 
   path_samples: 1001        # Wire samples used by segmentation DP
   joint:
@@ -207,6 +207,6 @@ preview:
   roll: 0                    # deg – 3D view roll
   light_azimuth: 225         # deg – light direction azimuth
   light_elevation: 45        # deg – light direction elevation
-  color: '#b3b3b3'           # hex or name – model color
+  color: '#b3b3b3'           # hex or name – model color; also base hue for per-part colors in --server viewer when the result is a multi-part assembly
   opacity: 1.0               # 0.0–1.0
   background: '#1a1a2e'      # hex or name – background color

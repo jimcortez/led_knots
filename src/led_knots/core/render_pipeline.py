@@ -14,12 +14,13 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import cadquery as cq
 import trimesh
 
 from .cache_utils import preview_stl_path_for_part
+from .color_palette import ColoredShape, colored_assembly_shapes, iter_assembly_leaf_solids
 from .preview import render_glb_to_image, render_stl_to_image
 
 logger = logging.getLogger(__name__)
@@ -45,18 +46,23 @@ def _glb_bytes_via_viewer_render(obj, config, name: str) -> bytes:
     return glbs[0]
 
 
-def _cadquery_web_viewer_show(config, name: str, *objs) -> None:
+def _cadquery_web_viewer_show(
+    config,
+    names: Union[str, List[str], None],
+    *objs,
+) -> None:
     """Send geometry to cadquery-web-viewer (embedded or remote per config)."""
     from cadquery_web_viewer import show
 
     tess_kw = _viewer_tessellation_kwargs(config)
     st = config.viewer_server_type
     block = bool(config.viewer_block_until_disconnect)
+    label = names if isinstance(names, str) else ", ".join(names or [])
     if st == "remote":
         ro = config.viewer_remote_options or {}
         show(
             *objs,
-            names=name,
+            names=names,
             server_type="remote",
             remote_options=ro,
             block_until_disconnect=False,
@@ -64,7 +70,7 @@ def _cadquery_web_viewer_show(config, name: str, *objs) -> None:
         )
         logger.info(
             "Posted %s to cadquery-web-viewer at http://%s:%s/",
-            name,
+            label,
             ro.get("host", "localhost"),
             ro.get("port", 32323),
         )
@@ -72,7 +78,7 @@ def _cadquery_web_viewer_show(config, name: str, *objs) -> None:
     so = config.viewer_server_options or {}
     show(
         *objs,
-        names=name,
+        names=names,
         server_type="in-process",
         server_options=so,
         block_until_disconnect=block,
@@ -80,10 +86,73 @@ def _cadquery_web_viewer_show(config, name: str, *objs) -> None:
     )
     logger.info(
         "cadquery-web-viewer (%s): http://%s:%s/",
-        name,
+        label,
         so.get("host", "127.0.0.1"),
         so.get("port", 32323),
     )
+
+
+def _cadquery_web_viewer_show_colored_parts(
+    config,
+    names: List[str],
+    colored: List[ColoredShape],
+) -> None:
+    """
+    Show each assembly part with its own ``color_faces`` (and embedded vertex colors).
+
+    Posts one object at a time so per-part colors are not lost when the viewer UI
+    applies a default white material over the mesh.
+    """
+    from cadquery_web_viewer import show
+
+    tess_kw = _viewer_tessellation_kwargs(config)
+    st = config.viewer_server_type
+    block = bool(config.viewer_block_until_disconnect)
+    for idx, (part_name, shape) in enumerate(zip(names, colored)):
+        kw = {
+            **tess_kw,
+            "color_faces": shape.color,
+            "auto_clear": idx == 0,
+        }
+        if st == "remote":
+            ro = config.viewer_remote_options or {}
+            show(
+                shape,
+                names=part_name,
+                server_type="remote",
+                remote_options=ro,
+                block_until_disconnect=False,
+                **kw,
+            )
+        else:
+            so = config.viewer_server_options or {}
+            show(
+                shape,
+                names=part_name,
+                server_type="in-process",
+                server_options=so,
+                block_until_disconnect=block and idx == len(colored) - 1,
+                **kw,
+            )
+    label = ", ".join(names)
+    if st == "remote":
+        ro = config.viewer_remote_options or {}
+        logger.info(
+            "Posted %s (%d parts) to cadquery-web-viewer at http://%s:%s/",
+            label,
+            len(colored),
+            ro.get("host", "localhost"),
+            ro.get("port", 32323),
+        )
+    else:
+        so = config.viewer_server_options or {}
+        logger.info(
+            "cadquery-web-viewer (%s, %d parts): http://%s:%s/",
+            label,
+            len(colored),
+            so.get("host", "127.0.0.1"),
+            so.get("port", 32323),
+        )
 
 
 def _exit_if_remote_viewer_idle(config, *, did_followup_glb_work: bool) -> None:
@@ -619,6 +688,13 @@ class PartArtifacts:
     def emit_viewer(self, name: str) -> None:
         if not self.plan.want_viewer:
             return
+        if self.is_assembly and self.assy is not None:
+            leaves = iter_assembly_leaf_solids(self.assy)
+            if len(leaves) >= 2:
+                base_rgb = self.config.preview_settings._color_rgb
+                part_names, colored = colored_assembly_shapes(self.assy, base_rgb)
+                _cadquery_web_viewer_show_colored_parts(self.config, part_names, colored)
+                return
         glb = self.ensure_glb_preview(name)
         _cadquery_web_viewer_show(self.config, name, glb)
 

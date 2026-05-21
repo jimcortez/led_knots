@@ -15,6 +15,7 @@ from .print_joint import (
     apply_lap_joint_features,
     apply_registration_features,
     extend_segment_points_for_lap,
+    joint_tangent_at_cut,
     lap_overlap_mm,
 )
 
@@ -256,7 +257,17 @@ def build_segmented_tube_assembly(
             placed = rot_shape.translate((x_off, y_off, z_off))
             cursor_x = x_off + bb.xlen + float(config.max_print_bounds.layout_gap_mm)
         else:
-            placed = part_shape
+            gap = float(config.max_print_bounds.layout_gap_mm)
+            if gap > 0 and len(plans) > 1:
+                offset = np.zeros(3, dtype=float)
+                half = 0.5 * gap
+                if idx > 0:
+                    offset += joint_tangent_at_cut(sampled_points, s) * half
+                if idx < len(plans) - 1:
+                    offset -= joint_tangent_at_cut(sampled_points, e) * half
+                placed = part_shape.translate(tuple(offset))
+            else:
+                placed = part_shape
 
         assy = assy.add(placed, name=f"segment_{idx:02d}")
 
