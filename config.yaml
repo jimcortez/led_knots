@@ -6,18 +6,18 @@
 # Output bounds: bounding box for knot path scaling
 # -----------------------------------------------------------------------------
 output_bounds:
-  width: 400    # mm
-  length: 400   # mm
-  height: 350     # mm
+  # width: 400    # mm
+  # length: 400   # mm
+  # height: 350     # mm
 
   # Elegoo Saturn 4 Ultra 16k build volume
-  # width: 200    # mm
-  # length: 110   # mm
-  # height: 200     # mm
+  width: 200    # mm
+  length: 110   # mm
+  height: 200     # mm
 
 # Active cross-section face: led_circle | led_circle_diffusion_pyramids |
-# solid_circle | solid_circle_pyramid | square
-face_type: led_circle
+# led_circle_tube | solid_circle | solid_circle_pyramid | square
+face_type: led_circle_tube
 
 # -----------------------------------------------------------------------------
 # Face-specific settings (keyed by face type)
@@ -47,6 +47,13 @@ face_settings:
       ridge_spacing: 1      # mm
       ridge_depth: 2.5     # mm – peak height of pyramid along path
 
+  led_circle_tube:
+    outer_diameter: 30              # mm – tube outer diameter
+    wall_thickness: 4.0             # mm – outer ring wall thickness
+    inner_tube_diameter: 10         # mm – ID of the central circular tube
+    inner_tube_wall_thickness: 0.5  # mm – wall around the central tube
+    connector_width: 0.5            # mm – width of connectors to center tube
+
   led_circle_diffusion_pyramids:
     inherit_from: led_circle
     diffusion_ridges:
@@ -74,13 +81,13 @@ face_settings:
 # Path / twist limits
 # -----------------------------------------------------------------------------
 path:
-  min_90_degree_twist_distance: 5   # mm – minimum path length for 90° twist
+  min_90_degree_twist_distance: 1   # mm – minimum path length for 90° twist
 
 # -----------------------------------------------------------------------------
 # Print segmentation (optional): split oversized knots into printable segments
 # -----------------------------------------------------------------------------
 max_print_bounds:
-  enabled: true
+  enabled: false
 
   # Elegoo Saturn 4 Ultra 16k build volume
   width: 200    # mm
@@ -141,6 +148,21 @@ clamp:
   alignment_notch_width_mm: 3.0   # mm – length along Z (axial)
   alignment_notch_depth_mm: 0.8   # mm – protrusion into mating half (Y)
   alignment_notch_clearance_mm: 0.1  # mm – clearance for easy assembly
+
+# -----------------------------------------------------------------------------
+# Print optimization (SLA / resin print prep)
+# -----------------------------------------------------------------------------
+# Detects overhangs/islands/cavities and (with auto_apply) re-orients the part
+# to minimise support material. Defaults disabled so existing flows are
+# unchanged. Override with --optimize / --auto-orient on the CLI.
+print_optimization:
+  enabled: false
+  target: sla                  # sla | fdm  (PR1 wires up sla only)
+  overhang_threshold_deg: 35   # SLA: ~35°; FDM: ~45° (reserved for future)
+  orientation:
+    enabled: true
+    auto_apply: false          # require --auto-orient to mutate geometry
+    top_n_candidates: 5
 
 # -----------------------------------------------------------------------------
 # Server (cadquery-web-viewer)

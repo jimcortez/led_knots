@@ -11,11 +11,12 @@ import yaml
 from pathlib import Path
 from typing import Any, Dict, Optional
 from .utils import parse_args
+from led_knots.optimize.settings import PrintOptimizationSettings
 
 logger = logging.getLogger(__name__)
 
 # Face types allowed for top-level face_type and in face_settings keys.
-VALID_FACE_TYPES = ('led_circle', 'led_circle_diffusion_pyramids', 'solid_circle', 'solid_circle_pyramid', 'square')
+VALID_FACE_TYPES = ('led_circle', 'led_circle_diffusion_pyramids', 'led_circle_tube', 'solid_circle', 'solid_circle_pyramid', 'square')
 
 
 def _deep_merge_face_settings(base: Dict[str, Any], current: Dict[str, Any]) -> Dict[str, Any]:
@@ -281,6 +282,11 @@ class TubeSettings:
         self.rect_inner_x = float(data.get('rect_inner_x', 4.0))
         self.rect_inner_y = float(data.get('rect_inner_y', 12.0))
 
+        itd = data.get('inner_tube_diameter')
+        self.inner_tube_diameter = float(itd) if itd is not None else None
+        itwt = data.get('inner_tube_wall_thickness')
+        self.inner_tube_wall_thickness = float(itwt) if itwt is not None else None
+
         diffusion_ridges_data = data.get('diffusion_ridges')
         if diffusion_ridges_data is False or diffusion_ridges_data is None:
             self.diffusion_ridges = None
@@ -327,6 +333,29 @@ class TubeSettings:
         }
         if self.diffusion_ridges is not None:
             base_kwargs['diffusion_ridges'] = self.diffusion_ridges
+        base_kwargs.update(kwargs)
+        return base_kwargs
+
+    def to_led_circle_tube_face_kwargs(self, **kwargs) -> Dict[str, Any]:
+        """
+        Return parameters for create_led_circle_tube_face.
+        Requires inner_tube_diameter and inner_tube_wall_thickness in face_settings.
+        """
+        if self.inner_tube_diameter is None:
+            raise ValueError(
+                "inner_tube_diameter must be set in face_settings for face_type 'led_circle_tube'"
+            )
+        if self.inner_tube_wall_thickness is None:
+            raise ValueError(
+                "inner_tube_wall_thickness must be set in face_settings for face_type 'led_circle_tube'"
+            )
+        base_kwargs = {
+            'outer_radius': self.outer_radius,
+            'wall_thickness': self.wall_thickness,
+            'inner_tube_diameter': self.inner_tube_diameter,
+            'inner_tube_wall_thickness': self.inner_tube_wall_thickness,
+            'connector_width': self.connector_width,
+        }
         base_kwargs.update(kwargs)
         return base_kwargs
 
@@ -489,6 +518,9 @@ class Config:
         self.max_print_bounds = MaxPrintBoundsSettings(config_data.get("max_print_bounds", {}))
         self.tube_gap = TubeGapSettings(config_data.get("tube_gap", {}))
         self.clamp = ClampSettings(config_data.get("clamp", {}))
+        self.print_optimization = PrintOptimizationSettings(
+            config_data.get("print_optimization", {})
+        )
         
         # Parse command line arguments
         args = parse_args(description=description or "Create and render a knot model")

@@ -102,6 +102,10 @@ def config_settings_hash(config) -> str:
         }
     else:
         out['tube_settings']['diffusion_ridges'] = None
+    if ts.inner_tube_diameter is not None:
+        out['tube_settings']['inner_tube_diameter'] = _round_for_hash(ts.inner_tube_diameter)
+    if ts.inner_tube_wall_thickness is not None:
+        out['tube_settings']['inner_tube_wall_thickness'] = _round_for_hash(ts.inner_tube_wall_thickness)
     if ts.face_type == 'solid_circle_pyramid':
         out['tube_settings']['_pyramid_sampling_version'] = 1
 
@@ -137,6 +141,11 @@ def config_settings_hash(config) -> str:
             "flank_angle_deg": _round_for_hash(mp.joint.flank_angle_deg),
         },
     }
+    # Include print_optimization so toggling --optimize / --auto-orient
+    # invalidates stale preview STLs (orientation mutates exported geometry).
+    po = getattr(config, "print_optimization", None)
+    if po is not None:
+        out["print_optimization"] = po.cache_key_dict()
     blob = str(sorted(out.items()))
     return hashlib.sha256(blob.encode()).hexdigest()[:_PATH_HASH_DIGEST_LEN]
 
