@@ -4,13 +4,13 @@ version = "0.1.0"
 description = "Mathematical knot models for LED strip housings using CadQuery"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-license = {text = "MIT"}
+license = {text = "GPL-3.0-or-later"}
 keywords = ["cadquery", "3d-printing", "led", "knots", "cad"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Manufacturing",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering",
