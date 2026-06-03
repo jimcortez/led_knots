@@ -19,6 +19,7 @@ from typing import Tuple, Union
 import cadquery as cq
 import trimesh
 
+from .analysis import detect_islands, detect_overhangs, detect_trapped_cavities
 from .orient import best_rotation_by_overhang, find_best_orientations
 from .report import OptimizationReport, OrientationCandidate, format_console
 from .settings import PrintOptimizationSettings
@@ -178,4 +179,28 @@ def optimize_part(
             logger.warning("optimize_part: rotation apply failed (%r); skipping.", exc)
             report.note = f"rotation apply failed: {exc!r}"
 
+    # Re-tessellate after any rotation so analyzers report findings on
+    # the final orientation that will be exported.
+    try:
+        analysis_mesh = _to_trimesh(part) if opt_settings.orientation.auto_apply else mesh
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("optimize_part: post-rotate tessellation failed (%r)", exc)
+        analysis_mesh = mesh
+
+    try:
+        report.overhangs = detect_overhangs(
+            analysis_mesh, threshold_deg=opt_settings.overhang_threshold_deg
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("optimize_part: overhang analyzer failed (%r)", exc)
+    try:
+        report.islands = detect_islands(analysis_mesh)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("optimize_part: island analyzer failed (%r)", exc)
+    try:
+        report.cavities = detect_trapped_cavities(analysis_mesh)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("optimize_part: cavity analyzer failed (%r)", exc)
+
+    report.mesh = analysis_mesh
     return part, report

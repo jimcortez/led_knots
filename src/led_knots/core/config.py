@@ -555,12 +555,14 @@ class Config:
         # it explicitly. None means "use config.yaml value".
         cli_optimize = getattr(args, "optimize", None)
         cli_auto_orient = bool(getattr(args, "auto_orient", False))
-        if cli_optimize is True or cli_auto_orient:
+        cli_report_dir = getattr(args, "optimize_report_dir", None)
+        if cli_optimize is True or cli_auto_orient or cli_report_dir:
             self.print_optimization.enabled = True
         elif cli_optimize is False:
             self.print_optimization.enabled = False
         if cli_auto_orient:
             self.print_optimization.orientation.auto_apply = True
+        self.optimize_report_dir = cli_report_dir
 
     def _init_viewer_from_args(self, args) -> None:
         """

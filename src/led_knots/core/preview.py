@@ -268,6 +268,118 @@ def render_glb_to_image(
     logger.info("Preview image saved to %s", image_path)
 
 
+def render_annotated_mesh_to_image(
+    mesh: trimesh.Trimesh,
+    image_path: Path,
+    preview_config: Any,
+    *,
+    face_colors: np.ndarray,
+) -> None:
+    """
+    Render a trimesh with per-face colors to an image.
+
+    Used by the SLA print-optimization stage to produce annotated diagnostic
+    images (e.g. overhangs in red). ``face_colors`` is a ``(F, 4)`` uint8
+    RGBA array, one row per face. Lighting/camera/background come from
+    ``preview_config`` (same fields as ``render_glb_to_image``).
+    """
+    if face_colors.shape != (len(mesh.faces), 4):
+        raise ValueError(
+            f"face_colors shape {face_colors.shape} does not match mesh "
+            f"face count ({len(mesh.faces)}, 4)"
+        )
+    image_path = Path(image_path)
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+
+    annotated = mesh.copy()
+    annotated.visual.face_colors = face_colors
+
+    # pyrender.Mesh.from_trimesh respects vertex colors when no material
+    # is supplied — pass smooth=False so per-face colors don't blend at
+    # shared vertices.
+    pr_mesh = pyrender.Mesh.from_trimesh(annotated, smooth=False)
+
+    bg_r, bg_g, bg_b = preview_config._background_rgb
+    scene = pyrender.Scene(
+        ambient_light=[0.45, 0.45, 0.45],
+        bg_color=[float(bg_r), float(bg_g), float(bg_b), 1.0],
+    )
+    scene.add(pr_mesh, pose=np.eye(4, dtype=np.float32))
+
+    bounds = annotated.bounds
+    center = np.array((bounds[0] + bounds[1]) * 0.5, dtype=np.float64)
+    extents = bounds[1] - bounds[0]
+    scale = float(np.max(extents)) or 1.0
+    distance = 1.8 * scale
+
+    width = max(1, preview_config.image_width)
+    height = max(1, preview_config.image_height)
+    aspect = width / height
+    camera = pyrender.PerspectiveCamera(yfov=math.pi / 4.0, aspectRatio=aspect)
+    # The annotated mesh is in the source CAD frame (Z-up, mm). Match that.
+    cam_pose = _camera_pose_from_view(
+        center,
+        distance,
+        elevation_deg=preview_config.elevation,
+        azimuth_deg=preview_config.azimuth,
+        roll_deg=preview_config.roll,
+        world_up_axis="z",
+    )
+    scene.add(camera, pose=cam_pose)
+
+    light_az = math.radians(preview_config.light_azimuth)
+    light_el = math.radians(preview_config.light_elevation)
+    d = 2.0 * distance
+    light_pos = center + np.array([
+        d * math.cos(light_el) * math.cos(light_az),
+        d * math.cos(light_el) * math.sin(light_az),
+        d * math.sin(light_el),
+    ], dtype=np.float32)
+    light = pyrender.DirectionalLight(color=np.ones(3), intensity=1.5)
+    light_forward = center - light_pos
+    light_forward = light_forward / (np.linalg.norm(light_forward) + 1e-12)
+    world_up = np.array([0, 0, 1], dtype=np.float32)
+    light_right = np.cross(light_forward, world_up)
+    rn = np.linalg.norm(light_right)
+    if rn > 1e-8:
+        light_right = light_right / rn
+    else:
+        light_right = np.array([1, 0, 0], dtype=np.float32)
+    light_up = np.cross(light_right, light_forward)
+    light_pose = np.eye(4, dtype=np.float32)
+    light_pose[:3, 0] = light_right
+    light_pose[:3, 1] = light_up
+    light_pose[:3, 2] = -light_forward
+    light_pose[:3, 3] = light_pos
+    scene.add(light, pose=light_pose)
+
+    renderer = pyrender.OffscreenRenderer(width, height)
+    try:
+        color_buf, _ = renderer.render(scene)
+    finally:
+        renderer.delete()
+
+    rgb = color_buf[:, :, :3]
+    if color_buf.dtype == np.uint8:
+        if color_buf.shape[2] >= 4:
+            alpha = color_buf[:, :, 3:4].astype(np.float32) / 255.0
+            bg_uint8 = np.array([int(bg_r * 255), int(bg_g * 255), int(bg_b * 255)], dtype=np.uint8)
+            bg_frame = np.ones_like(rgb, dtype=np.uint8) * bg_uint8
+            out_uint8 = (alpha * rgb + (1 - alpha) * bg_frame).clip(0, 255).astype(np.uint8)
+        else:
+            out_uint8 = rgb
+    else:
+        if color_buf.shape[2] >= 4:
+            alpha = color_buf[:, :, 3:4]
+            bg_frame = np.ones_like(rgb) * np.array([bg_r, bg_g, bg_b])
+            out = (alpha * rgb + (1 - alpha) * bg_frame).clip(0, 1)
+        else:
+            out = rgb.clip(0, 1)
+        out_uint8 = (out * 255).astype(np.uint8)
+    Image.fromarray(out_uint8).save(str(image_path), "PNG")
+    logger.info("Annotated preview image saved to %s", image_path)
+
+
 def render_stl_to_image(
     stl_path: Path,
     image_path: Path,

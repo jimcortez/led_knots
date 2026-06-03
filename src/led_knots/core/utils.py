@@ -134,6 +134,16 @@ def parse_args(description: str = "Create and render a knot model"):
             'Implies --optimize. Without this flag the optimizer reports findings only.'
         ),
     )
+    parser.add_argument(
+        '--optimize-report-dir',
+        type=str,
+        metavar='DIR',
+        default=None,
+        help=(
+            'Write annotated PNG diagnostics (overhangs in red, etc.) for the '
+            'optimizer run to DIR. Implies --optimize.'
+        ),
+    )
     args = parser.parse_args()
     
     # Configure logging if verbose flag is set
@@ -431,6 +441,19 @@ def draw_part(path, config, aux=None, **face_kwargs):
                 result, config.print_optimization, name=config.name or "part"
             )
             print(format_console(report, part_name=config.name or "part"))
+            report_dir = getattr(config, "optimize_report_dir", None)
+            if report_dir and report.mesh is not None:
+                from led_knots.optimize.report import write_annotated_pngs
+                from led_knots.core.cache_utils import slugify
+                written = write_annotated_pngs(
+                    report,
+                    report.mesh,
+                    Path(report_dir),
+                    part_name=slugify(config.name or "knot"),
+                    preview_settings=config.preview_settings,
+                )
+                for p in written:
+                    logger.info("[optimize] annotated PNG: %s", p)
 
     render_part(
         result,
