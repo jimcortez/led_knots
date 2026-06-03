@@ -550,6 +550,18 @@ class Config:
         self.export_parts_dir = getattr(args, "export_parts_dir", None)
         self.name = name  # Name of the part (used for export/display)
 
+        # CLI overrides for the print-optimization stage. --auto-orient
+        # implies enabling the optimizer; --optimize / --no-optimize set
+        # it explicitly. None means "use config.yaml value".
+        cli_optimize = getattr(args, "optimize", None)
+        cli_auto_orient = bool(getattr(args, "auto_orient", False))
+        if cli_optimize is True or cli_auto_orient:
+            self.print_optimization.enabled = True
+        elif cli_optimize is False:
+            self.print_optimization.enabled = False
+        if cli_auto_orient:
+            self.print_optimization.orientation.auto_apply = True
+
     def _init_viewer_from_args(self, args) -> None:
         """
         Resolve cadquery-web-viewer usage from ``--viewer`` / ``--server`` and YAML ``server.viewer``.

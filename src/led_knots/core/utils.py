@@ -108,6 +108,31 @@ def parse_args(description: str = "Create and render a knot model"):
         metavar='DIR',
         help="Directory to write per-part exports when --export-parts is used.",
     )
+    # Print optimization (SLA / resin). See config.yaml print_optimization block.
+    opt_group = parser.add_mutually_exclusive_group()
+    opt_group.add_argument(
+        '--optimize',
+        dest='optimize',
+        action='store_true',
+        default=None,
+        help='Enable the SLA print-optimization stage (overrides config).',
+    )
+    opt_group.add_argument(
+        '--no-optimize',
+        dest='optimize',
+        action='store_false',
+        default=None,
+        help='Disable the SLA print-optimization stage (overrides config).',
+    )
+    parser.add_argument(
+        '--auto-orient',
+        action='store_true',
+        default=False,
+        help=(
+            'Apply the top-ranked SLA build orientation to the exported geometry. '
+            'Implies --optimize. Without this flag the optimizer reports findings only.'
+        ),
+    )
     args = parser.parse_args()
     
     # Configure logging if verbose flag is set
@@ -381,6 +406,21 @@ def draw_part(path, config, aux=None, **face_kwargs):
         )
     else:
         result = build_tube_from_path(path, config, aux=aux, face_kwargs=face_kwargs_dict)
+
+    if config.print_optimization.enabled:
+        # Per-segment integration with max_print_bounds is a follow-up
+        # commit; for now, log and skip when the result is an assembly.
+        if isinstance(result, cq.Assembly):
+            logger.info(
+                "[optimize] %s: skipped (segmented assembly; per-segment integration pending)",
+                config.name or "part",
+            )
+        else:
+            from led_knots.optimize import optimize_part, format_console
+            result, report = optimize_part(
+                result, config.print_optimization, name=config.name or "part"
+            )
+            print(format_console(report, part_name=config.name or "part"))
 
     render_part(
         result,
