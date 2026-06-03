@@ -4,12 +4,15 @@ Wire-driven segmentation for multi-part printing.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence, Tuple
 
 import cadquery as cq
 import numpy as np
 from cadquery.func import spline
+
+logger = logging.getLogger(__name__)
 
 from .print_joint import (
     apply_lap_joint_features,
@@ -80,15 +83,20 @@ def _joint_margin(config) -> float:
     return radial + lap
 
 
-def _best_rotation_for_segment(
+def _feasible_rotations_for_segment(
     points: np.ndarray,
     printer_dims_sorted: Sequence[float],
     outer_radius: float,
     extra_margin: float,
     rotations: Sequence[Tuple[float, float, float]],
-) -> Optional[Tuple[float, float, float]]:
-    best = None
-    best_score = None
+) -> List[Tuple[Tuple[float, float, float], Tuple[float, float, float, float]]]:
+    """Return all rotations that fit the print bed, sorted by dim-score.
+
+    Each element is ``(euler_xyz_deg, dim_score)`` where ``dim_score`` is
+    the same lexicographic tuple used by ``_best_rotation_for_segment``
+    (largest dim, then second, third, then sum). Lower is better.
+    """
+    feasible: List[Tuple[Tuple[float, float, float], Tuple[float, float, float, float]]] = []
     inflate = 2.0 * (float(outer_radius) + float(extra_margin))
     for euler in rotations:
         m = _euler_to_matrix(*euler)
@@ -96,12 +104,28 @@ def _best_rotation_for_segment(
         ext = rot.max(axis=0) - rot.min(axis=0)
         ext = ext + inflate
         dims = sorted([float(ext[0]), float(ext[1]), float(ext[2])], reverse=True)
-        if dims[0] <= printer_dims_sorted[0] and dims[1] <= printer_dims_sorted[1] and dims[2] <= printer_dims_sorted[2]:
+        if (
+            dims[0] <= printer_dims_sorted[0]
+            and dims[1] <= printer_dims_sorted[1]
+            and dims[2] <= printer_dims_sorted[2]
+        ):
             score = (dims[0], dims[1], dims[2], sum(dims))
-            if best_score is None or score < best_score:
-                best_score = score
-                best = euler
-    return best
+            feasible.append((euler, score))
+    feasible.sort(key=lambda x: x[1])
+    return feasible
+
+
+def _best_rotation_for_segment(
+    points: np.ndarray,
+    printer_dims_sorted: Sequence[float],
+    outer_radius: float,
+    extra_margin: float,
+    rotations: Sequence[Tuple[float, float, float]],
+) -> Optional[Tuple[float, float, float]]:
+    feasible = _feasible_rotations_for_segment(
+        points, printer_dims_sorted, outer_radius, extra_margin, rotations
+    )
+    return feasible[0][0] if feasible else None
 
 
 def plan_segments(sampled_points: Sequence[Tuple[float, float, float]], config) -> List[SegmentPlan]:
@@ -201,6 +225,32 @@ def build_segmented_tube_assembly(
 
     lap_mm = lap_overlap_mm(config.max_print_bounds.joint) if config.max_print_bounds.joint.enabled else 0.0
 
+    # SLA rescoring is meaningful only when we will actually rotate each
+    # segment for the build plate. In path-layout mode the per-segment
+    # rotation is ignored, so we skip the work.
+    po = getattr(config, "print_optimization", None)
+    sla_rescore = (
+        po is not None
+        and po.enabled
+        and po.orientation.enabled
+        and po.orientation.auto_apply
+        and print_bed_layout
+    )
+    if sla_rescore:
+        from led_knots.optimize import best_orientation_index
+
+        mp = config.max_print_bounds
+        usable = [
+            float(mp.width - 2.0 * mp.clearance_mm),
+            float(mp.length - 2.0 * mp.clearance_mm),
+            float(mp.height - 2.0 * mp.clearance_mm),
+        ]
+        printer_dims_sorted = sorted(usable, reverse=True)
+        outer_radius = float(config.tube_settings.outer_radius)
+        extra_margin = _joint_margin(config)
+        all_rotations = _rotation_candidates_24()
+        overhang_threshold = float(po.overhang_threshold_deg)
+
     for idx, plan in enumerate(plans):
         seg_pts = sampled_points[plan.start_idx : plan.end_idx + 1]
         if lap_mm > 0:
@@ -248,8 +298,34 @@ def build_segmented_tube_assembly(
             config=config,
         )
 
+        euler = plan.euler_xyz_deg
+        if sla_rescore:
+            seg_points = np.asarray(seg_pts, dtype=float)
+            feasible = _feasible_rotations_for_segment(
+                seg_points,
+                printer_dims_sorted,
+                outer_radius=outer_radius,
+                extra_margin=extra_margin,
+                rotations=all_rotations,
+            )
+            if feasible:
+                eulers = [f[0] for f in feasible]
+                matrices = [_euler_to_matrix(*e) for e in eulers]
+                win_idx = best_orientation_index(
+                    part_shape,
+                    matrices,
+                    overhang_threshold_deg=overhang_threshold,
+                )
+                chosen = eulers[win_idx]
+                if chosen != plan.euler_xyz_deg:
+                    logger.info(
+                        "[optimize] segment_%02d: feasible=%d, SLA pick %s replaces dim-best %s",
+                        idx, len(feasible), chosen, plan.euler_xyz_deg,
+                    )
+                euler = chosen
+
         if print_bed_layout:
-            rot_shape = _rotate_shape(part_shape, plan.euler_xyz_deg)
+            rot_shape = _rotate_shape(part_shape, euler)
             bb = rot_shape.BoundingBox()
             x_off = cursor_x - bb.xmin
             y_off = -bb.ymin

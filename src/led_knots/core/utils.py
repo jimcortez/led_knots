@@ -24,6 +24,7 @@ from cadquery.func import Plane, Location, sweep
 from .led_circle import (
     _pyramid_ridge_height_at_t,
     create_led_circle_face,
+    create_led_circle_tube_face,
     create_solid_circle_face,
     create_square_face,
 )
@@ -310,6 +311,13 @@ def build_tube_from_path(path, config, aux=None, face_kwargs: Optional[dict] = N
         )
         return sweep(faces, path, aux=aux)
 
+    if face_type == 'led_circle_tube':
+        tube_kw = config.tube_settings.to_led_circle_tube_face_kwargs(
+            orient_to_path=path,
+            **face_kwargs_dict,
+        )
+        logger.debug("build_tube_from_path (led_circle_tube): calling sweep (single profile)")
+        return sweep(create_led_circle_tube_face(**tube_kw), path, aux=aux)
     if face_type == 'led_circle':
         logger.debug("build_tube_from_path (led_circle): calling sweep (single profile)")
         return sweep(create_led_circle_face(**face_kw), path, aux=aux)
@@ -408,11 +416,13 @@ def draw_part(path, config, aux=None, **face_kwargs):
         result = build_tube_from_path(path, config, aux=aux, face_kwargs=face_kwargs_dict)
 
     if config.print_optimization.enabled:
-        # Per-segment integration with max_print_bounds is a follow-up
-        # commit; for now, log and skip when the result is an assembly.
+        # Segmented assemblies are SLA-rescored inside
+        # build_segmented_tube_assembly itself (per-segment), so here we
+        # only run the whole-part optimizer for single-piece outputs.
         if isinstance(result, cq.Assembly):
-            logger.info(
-                "[optimize] %s: skipped (segmented assembly; per-segment integration pending)",
+            logger.debug(
+                "[optimize] %s: segmented assembly — per-segment rescoring "
+                "already applied inside build_segmented_tube_assembly",
                 config.name or "part",
             )
         else:

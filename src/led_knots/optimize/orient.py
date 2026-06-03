@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import List
+from typing import List, Sequence, Tuple
 
 import numpy as np
 import trimesh
@@ -19,6 +19,69 @@ from ._tweaker import Tweak
 from .report import OrientationCandidate
 
 logger = logging.getLogger(__name__)
+
+
+def score_orientation_overhang(
+    face_normals: np.ndarray,
+    face_areas: np.ndarray,
+    rotation_matrix: np.ndarray,
+    *,
+    overhang_threshold_deg: float = 35.0,
+) -> float:
+    """Cheap SLA score for a rotation: total downward-facing face area.
+
+    Returns the sum (in mm²) of face areas whose post-rotation normals lie
+    within ``overhang_threshold_deg`` of straight-down — i.e. the faces
+    that would need supports if the model were oriented this way.
+
+    The mesh itself is *not* rotated; we transform the world-down vector
+    by ``rotation_matrix.T`` instead, so this is O(F) per rotation candidate
+    rather than O(F) vertex transforms per candidate.
+
+    Args:
+        face_normals: (F, 3) unit normals in the original mesh frame.
+        face_areas: (F,) area in mm² per face.
+        rotation_matrix: 3x3 rotation that would be applied to the mesh.
+        overhang_threshold_deg: faces within this angle of straight-down
+            count as overhangs. SLA: ~35°; FDM: ~45°.
+
+    Returns:
+        Total overhang area in mm² (lower is better).
+    """
+    down_world = np.array([0.0, 0.0, -1.0], dtype=np.float64)
+    down_local = rotation_matrix.T @ down_world  # equivalent post-rotation "down"
+    threshold = math.cos(math.radians(overhang_threshold_deg))
+    # n · down_local > cos(threshold) means the face faces downward (toward
+    # the build plate) within the overhang threshold.
+    dot = face_normals @ down_local
+    overhang_mask = dot > threshold
+    return float(face_areas[overhang_mask].sum())
+
+
+def best_rotation_by_overhang(
+    mesh: trimesh.Trimesh,
+    rotation_matrices: Sequence[np.ndarray],
+    *,
+    overhang_threshold_deg: float = 35.0,
+) -> Tuple[int, float]:
+    """Pick the rotation with the smallest overhang area for ``mesh``.
+
+    Returns ``(winning_index, score)``. The index points into
+    ``rotation_matrices``. Ties broken by lowest index, which preserves any
+    upstream ordering (e.g. dim-score from segmentation).
+    """
+    normals = np.asarray(mesh.face_normals, dtype=np.float64)
+    areas = np.asarray(mesh.area_faces, dtype=np.float64)
+    best_idx = 0
+    best_score = math.inf
+    for idx, mat in enumerate(rotation_matrices):
+        score = score_orientation_overhang(
+            normals, areas, mat, overhang_threshold_deg=overhang_threshold_deg
+        )
+        if score < best_score:
+            best_score = score
+            best_idx = idx
+    return best_idx, best_score
 
 
 def _axis_angle_from_matrix(matrix: np.ndarray) -> tuple:

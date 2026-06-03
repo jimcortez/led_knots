@@ -19,7 +19,7 @@ from typing import Tuple, Union
 import cadquery as cq
 import trimesh
 
-from .orient import find_best_orientations
+from .orient import best_rotation_by_overhang, find_best_orientations
 from .report import OptimizationReport, OrientationCandidate, format_console
 from .settings import PrintOptimizationSettings
 
@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "optimize_part",
+    "best_orientation_index",
     "OptimizationReport",
     "OrientationCandidate",
     "PrintOptimizationSettings",
@@ -96,6 +97,31 @@ def _apply_rotation(part: _PartT, candidate: OrientationCandidate) -> _PartT:
         candidate.angle_deg,
     )
     return rotated
+
+
+def best_orientation_index(
+    part: _PartT,
+    rotation_matrices,
+    *,
+    overhang_threshold_deg: float = 35.0,
+) -> int:
+    """
+    Pick the rotation that minimises overhang area when applied to ``part``.
+
+    Tessellates ``part`` once, then evaluates each rotation matrix by
+    transforming the world-down vector instead of the mesh — O(F) per
+    candidate, not O(F) vertex transforms.
+
+    Returns the winning index into ``rotation_matrices`` (0 if the list is
+    empty, since there's nothing better to do).
+    """
+    if not rotation_matrices:
+        return 0
+    mesh = _to_trimesh(part)
+    idx, _ = best_rotation_by_overhang(
+        mesh, rotation_matrices, overhang_threshold_deg=overhang_threshold_deg
+    )
+    return idx
 
 
 def optimize_part(
