@@ -4,6 +4,8 @@
 
 A Python tool for generating 3D printable mathematical knot models designed to house LED strips. Built using the [CadQuery](https://cadquery.readthedocs.io/) CAD engine.
 
+> **Looking for in-depth documentation?** See the [user manual under `docs/`](docs/README.md) — architecture, every CLI flag, every `config.yaml` key, cookbooks for adding new tube models and paths, and developer do's and don'ts.
+
 ## Overview
 
 LED Knots creates parametric 3D models of various mathematical knots and paths, each designed with an internal channel to accommodate LED strips. The models can be exported to STL, STEP, or other 3D formats for 3D printing.
