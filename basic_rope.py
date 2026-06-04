@@ -7,6 +7,8 @@ weave modulation (basketr cosine bulge / rope_sim oscillation).
 
 import argparse
 import math
+import signal
+from contextlib import contextmanager
 from pathlib import Path
 
 from cadquery import Vector, Wire, Plane, Compound, Edge
@@ -15,25 +17,55 @@ from cadquery.occ_impl.shapes import Solid
 from OCP.BRepAdaptor import BRepAdaptor_Curve
 from OCP.GCPnts import GCPnts_UniformAbscissa
 
-# Core / sleeve dimensions (mm)
-BASE_OUTER_SIZE = 14.5
-VALLEY_DEPTH = 3.0
-CORE_RADIUS = BASE_OUTER_SIZE - VALLEY_DEPTH
-STRAND_PROFILE_RADIUS = 2.5
-STRAND_SURFACE_RADIUS = CORE_RADIUS + STRAND_PROFILE_RADIUS
 
-# Braid parameters
-NUM_STRANDS_PER_DIR = 6
-NUM_RODS = 12  # circumferential weave frequency (basket number_of_rods)
-PITCH = 20.0  # mm arc length per full 360° helix turn
-LOFT_SAMPLES = 300
+@contextmanager
+def _time_limit(seconds):
+    """Raise TimeoutError if the wrapped block runs past `seconds` (Unix only)."""
+    def _handler(signum, frame):
+        raise TimeoutError(f"exceeded {seconds}s")
+    prev = signal.signal(signal.SIGALRM, _handler)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, prev)
+
+# Braid geometry (mm)
+#
+# Tubular 1-over-1 braid: NUM_STRANDS_PER_DIR strands spiral CW and the same
+# count spiral CCW. At every CW/CCW crossing one strand is above the base
+# helix radius and the other below, so the over/under genuinely interlaces.
+#
+# Only NUM_STRANDS_PER_DIR and OUTER_RADIUS are intended as user-tuned inputs.
+# Everything below is derived so scaling means changing N at the top.
+#
+# Strand fit on the cylinder: 2N strand centers (CW + CCW interleaved) at
+# angular spacing π/N. For circular profiles of radius p to fit at arc spacing
+# π·R/N with packing factor k_pack:
+#     p = k_pack · π·R / (2N)
+# Over/under separation needs WEAVE_AMPLITUDE > p so surfaces don't merge:
+#     δ = 1.2·p
+# Outer surface of any strand = R + δ + p = R · (1 + 1.1·π·k_pack/N).
+NUM_STRANDS_PER_DIR = 25         # 50 total strands; change this to scale
+OUTER_RADIUS = 14.0              # fixed outer rope radius (mm)
+_K_PACK = 0.7                    # 0..1 packing tightness; <1 leaves over/under headroom
+# Helix angle controls pitch (pitch = 2π·R / tan(α)). Shallower angles widen
+# the pitch, which is essential at high N: the radial-wiggle curvature radius
+# (≈ pitch² / (4π²·N²·δ)) must exceed STRAND_PROFILE_RADIUS or OCC's loft
+# and sweep both self-intersect. 30° empirically gives ~1.4× margin at N=25
+# with k_pack=0.7 — loft handles ~75% of strands; sweep mops up the rest.
+_HELIX_ANGLE_DEG = 30.0
+
+HELIX_RADIUS = OUTER_RADIUS / (1.0 + 1.1 * math.pi * _K_PACK / NUM_STRANDS_PER_DIR)
+STRAND_PROFILE_RADIUS = _K_PACK * math.pi * HELIX_RADIUS / (2.0 * NUM_STRANDS_PER_DIR)
+WEAVE_AMPLITUDE = 1.2 * STRAND_PROFILE_RADIUS
+PITCH = 2.0 * math.pi * HELIX_RADIUS / math.tan(math.radians(_HELIX_ANGLE_DEG))
+CORE_RADIUS = HELIX_RADIUS - WEAVE_AMPLITUDE + 0.6 * STRAND_PROFILE_RADIUS
+
 STRAND_START = 2.0
 STRAND_END_OFFSET = 2.0
-
-# Basket-style weave depth on helix radius
-WEAVE_BULGE = 1.5
-WEAVE_PHASE_CW = 0.0
-WEAVE_PHASE_CCW = math.pi
+# loft_samples is computed per-build inside build_braided_rope (depends on path length).
 
 
 def _norm(v):
@@ -55,15 +87,19 @@ def _lerp_vec(a, b, u):
     )
 
 
-def point_bulged_circle(radius, angle, bulge, num_rods):
-    """Basketr point_bulged_circle: r - bulge*cos(angle * num_rods / 2)."""
-    r_eff = radius - bulge * math.cos(angle * num_rods / 2.0)
-    return (r_eff * math.cos(angle), r_eff * math.sin(angle))
+def weave_radius(base_radius, s, pitch, amplitude, num_strands_per_dir, direction):
+    """
+    1-over-1 tubular braid radial modulation.
 
-
-def effective_strand_radius(base_radius, theta, bulge, num_rods, weave_phase):
-    """Radial offset for over/under: basket cosine in helix angle."""
-    return base_radius + bulge * math.cos(num_rods / 2.0 * theta + weave_phase)
+    All strands of the same direction share the same r(s); CW and CCW are
+    180° out of phase so at each CW/CCW crossing one is at +amplitude and
+    the other at -amplitude. Period = pitch / num_strands_per_dir, which
+    equals 2× the crossing interval of a strand against the opposite set.
+    """
+    if amplitude <= 0:
+        return base_radius
+    omega = 2.0 * math.pi * num_strands_per_dir / pitch
+    return base_radius + direction * amplitude * math.sin(omega * s)
 
 
 def get_samples(path, num_sections):
@@ -190,13 +226,19 @@ def build_helix_strand_on_path(
     pitch,
     phase,
     direction,
-    weave_phase,
+    loft_samples,
     use_weave=True,
-    weave_bulge=WEAVE_BULGE,
+    weave_amplitude=WEAVE_AMPLITUDE,
+    num_strands_per_dir=NUM_STRANDS_PER_DIR,
 ):
     """
     Continuous helical strand loft following path_samples frames.
-    Optional basket cosine radial weave on strand radius.
+
+    With use_weave=True the strand's helix radius oscillates per
+    weave_radius() so CW and CCW strands interlace at their crossings.
+
+    Returns (solid, used_sweep_fallback). used_sweep_fallback is True if the
+    multi-section loft failed and we fell back to a single-profile sweep.
     """
     s_start = STRAND_START
     s_end = path_length - STRAND_END_OFFSET
@@ -208,27 +250,27 @@ def build_helix_strand_on_path(
     tangents = []
     outwards = []
 
-    for i in range(LOFT_SAMPLES):
-        t = i / (LOFT_SAMPLES - 1)
+    for i in range(loft_samples):
+        t = i / (loft_samples - 1)
         s = s_start + t * strand_length
         frame = frame_at_arc_length(path_samples, s)
-        theta = direction * (s / pitch) * 2 * math.pi + phase
         if use_weave:
-            r = effective_strand_radius(
+            r = weave_radius(
                 strand_radius,
-                theta,
-                weave_bulge,
-                NUM_RODS,
-                weave_phase,
+                s,
+                pitch,
+                weave_amplitude,
+                num_strands_per_dir,
+                direction,
             )
         else:
             r = strand_radius
         pts.append(helix_point(s, frame, r, pitch, phase, direction))
 
-    for i in range(LOFT_SAMPLES):
+    for i in range(loft_samples):
         if i == 0:
             tang = _norm((pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2]))
-        elif i == LOFT_SAMPLES - 1:
+        elif i == loft_samples - 1:
             tang = _norm((pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1], pts[i][2] - pts[i - 1][2]))
         else:
             tang = _norm((
@@ -238,7 +280,7 @@ def build_helix_strand_on_path(
             ))
         tangents.append(tang)
 
-        frame = frame_at_arc_length(path_samples, s_start + i / (LOFT_SAMPLES - 1) * strand_length)
+        frame = frame_at_arc_length(path_samples, s_start + i / (loft_samples - 1) * strand_length)
         center = _vec(frame["point"])
         outward = _norm((
             pts[i][0] - center[0],
@@ -247,14 +289,15 @@ def build_helix_strand_on_path(
         ))
         outwards.append(outward)
 
-    # Parallel-transport profile x_dir along strand tangent
+    # Seed x_dir perpendicular to the strand tangent (outward projected onto
+    # the cross-section plane). Then parallel-transport along the tangents.
     t0 = tangents[0]
     n0 = outwards[0]
     dot = t0[0] * n0[0] + t0[1] * n0[1] + t0[2] * n0[2]
-    x_raw = (t0[0] - dot * n0[0], t0[1] - dot * n0[1], t0[2] - dot * n0[2])
+    x_raw = (n0[0] - dot * t0[0], n0[1] - dot * t0[1], n0[2] - dot * t0[2])
     x_dirs = [_norm(x_raw)]
 
-    for i in range(1, LOFT_SAMPLES):
+    for i in range(1, loft_samples):
         tang = tangents[i]
         prev_x = x_dirs[-1]
         dot = prev_x[0] * tang[0] + prev_x[1] * tang[1] + prev_x[2] * tang[2]
@@ -265,33 +308,41 @@ def build_helix_strand_on_path(
         )
         x_dirs.append(_norm(proj))
 
+    # Cross-section plane is perpendicular to the strand's own tangent so the
+    # circular profile sweeps a true cord, not a radially-flat ribbon.
     wires = []
-    for i in range(LOFT_SAMPLES):
+    for i in range(loft_samples):
         pt = Vector(*pts[i])
         x_dir = Vector(*x_dirs[i])
-        outward = Vector(*outwards[i])
-        pl = Plane(origin=pt, xDir=x_dir, normal=outward)
+        tangent = Vector(*tangents[i])
+        pl = Plane(origin=pt, xDir=x_dir, normal=tangent)
         wires.append(Wire.makeCircle(STRAND_PROFILE_RADIUS, pl.origin, pl.zDir))
 
     try:
-        return Solid.makeLoft(wires, ruled=False)
+        return Solid.makeLoft(wires, ruled=False), "loft"
     except Exception:
         try:
-            return Solid.makeLoft(wires, ruled=True)
+            return Solid.makeLoft(wires, ruled=True), "loft-ruled"
         except Exception:
             pass
 
-    # Fallback for curved paths where multi-section loft fails
-    path_pts = [Vector(*p) for p in pts]
-    path_edge = Edge.makeSpline(path_pts)
-    path_wire = Wire.assembleEdges([path_edge])
-    pl0 = Plane(
-        origin=Vector(*pts[0]),
-        xDir=Vector(*x_dirs[0]),
-        normal=Vector(*outwards[0]),
-    )
-    profile = Wire.makeCircle(STRAND_PROFILE_RADIUS, pl0.origin, pl0.zDir)
-    return Solid.sweep(profile, [], path_wire, makeSolid=True, isFrenet=True)
+    # Sweep fallback for strands the loft can't handle. Wrap in a timeout —
+    # at thin-strand / curved-path geometries OCC's MakePipeShell sometimes
+    # spins for minutes before giving up. 30s is generous for one strand.
+    try:
+        with _time_limit(30):
+            path_pts = [Vector(*p) for p in pts]
+            path_edge = Edge.makeSpline(path_pts)
+            path_wire = Wire.assembleEdges([path_edge])
+            pl0 = Plane(
+                origin=Vector(*pts[0]),
+                xDir=Vector(*x_dirs[0]),
+                normal=Vector(*tangents[0]),
+            )
+            profile = Wire.makeCircle(STRAND_PROFILE_RADIUS, pl0.origin, pl0.zDir)
+            return Solid.sweep(profile, [], path_wire, makeSolid=True, isFrenet=True), "sweep"
+    except (TimeoutError, Exception):
+        return None, "failed"
 
 
 def build_core_tube(path, path_samples):
@@ -320,39 +371,59 @@ def build_braided_rope(path=None, curved=False, use_weave=True):
 
     path_length = path.Length()
     path_samples = get_samples(path, 200 if curved else 100)
-    strand_weave = use_weave
-    pitch = PITCH
-    weave_bulge = WEAVE_BULGE
+
+    total_strands = 2 * NUM_STRANDS_PER_DIR
+    strand_dia = 2.0 * STRAND_PROFILE_RADIUS
+    samples_per_period = 20
+    loft_samples = max(
+        240,
+        min(1500, math.ceil(samples_per_period * NUM_STRANDS_PER_DIR * path_length / PITCH)),
+    )
+    print(
+        f"Braid: {total_strands} strands, strand_dia={strand_dia:.2f}mm, "
+        f"outer_dia={2 * OUTER_RADIUS:.1f}mm, pitch={PITCH:.1f}mm, "
+        f"loft_samples={loft_samples}"
+    )
+    if strand_dia < 1.2:
+        print(f"  note: strand_dia < 1.2mm FDM floor; SLA/visualization only")
 
     print("Generating core tube...")
     core = build_core_tube(path, path_samples)
 
-    print("Building helical braid strands...")
+    print(f"Building {total_strands} helical braid strands...")
     strands = []
-    for direction, label, weave_phase in [
-        (-1, "CW", WEAVE_PHASE_CW),
-        (1, "CCW", WEAVE_PHASE_CCW),
-    ]:
-        print(f"  -> {label} strands...")
+    method_counts = {"loft": 0, "loft-ruled": 0, "sweep": 0, "failed": 0}
+    built = 0
+    for direction, label in [(-1, "CW"), (1, "CCW")]:
         for i in range(NUM_STRANDS_PER_DIR):
             phase = i * (2 * math.pi / NUM_STRANDS_PER_DIR)
             if direction == 1:
                 phase += math.pi / NUM_STRANDS_PER_DIR
-            strand = build_helix_strand_on_path(
+            strand, method = build_helix_strand_on_path(
                 path_samples,
                 path_length,
-                STRAND_SURFACE_RADIUS,
-                pitch,
+                HELIX_RADIUS,
+                PITCH,
                 phase,
                 direction,
-                weave_phase,
-                use_weave=strand_weave,
-                weave_bulge=weave_bulge,
+                loft_samples,
+                use_weave=use_weave,
+                weave_amplitude=WEAVE_AMPLITUDE,
+                num_strands_per_dir=NUM_STRANDS_PER_DIR,
             )
-            strands.append(strand)
-            print(f"     strand {i + 1}/{NUM_STRANDS_PER_DIR} done")
+            method_counts[method] += 1
+            if strand is not None:
+                strands.append(strand)
+            built += 1
+            print(f"\r  strands: {built}/{total_strands}", end="", flush=True)
+    print()  # newline after the progress carriage-return
 
-    print(f"Total strands: {len(strands)}")
+    print(
+        f"  built via: loft={method_counts['loft']}, "
+        f"loft-ruled={method_counts['loft-ruled']}, "
+        f"sweep={method_counts['sweep']}, "
+        f"failed/skipped={method_counts['failed']} (of {total_strands})"
+    )
     return Compound.makeCompound([core] + strands)
 
 

@@ -682,6 +682,96 @@ def create_led_circle_face(
     return result
 
 
+def create_led_circle_tube_face(
+    outer_radius: float,
+    wall_thickness: float,
+    inner_tube_diameter: float,
+    inner_tube_wall_thickness: float,
+    connector_width: float = 1.0,
+    orient_to_path: Wire = None,
+    rotation_z: float = 90.0,
+):
+    """
+    Create a 2D cross-section with an outer ring, a central circular tube
+    (annulus), and two connectors joining the inner edge of the outer ring
+    to the outer edge of the center tube.
+
+    Args:
+        outer_radius: Outer radius of the main ring in mm.
+        wall_thickness: Wall thickness of the outer ring in mm.
+        inner_tube_diameter: Inner diameter (hole) of the center tube in mm.
+        inner_tube_wall_thickness: Wall thickness around the center hole in mm.
+        connector_width: Width of the two radial connectors in mm.
+        orient_to_path: Optional Wire — if provided, orient the result to the
+                        path's start point and tangent.
+        rotation_z: Rotation in degrees around Z (about profile center).
+    """
+    if outer_radius <= 0:
+        raise ValueError(f"outer_radius must be > 0 (got {outer_radius})")
+    if wall_thickness <= 0:
+        raise ValueError(f"wall_thickness must be > 0 (got {wall_thickness})")
+    if inner_tube_diameter <= 0:
+        raise ValueError(f"inner_tube_diameter must be > 0 (got {inner_tube_diameter})")
+    if inner_tube_wall_thickness <= 0:
+        raise ValueError(f"inner_tube_wall_thickness must be > 0 (got {inner_tube_wall_thickness})")
+    if connector_width <= 0:
+        raise ValueError(f"connector_width must be > 0 (got {connector_width})")
+
+    inner_radius = outer_radius - wall_thickness
+    if inner_radius <= 0:
+        raise ValueError(
+            f"outer_radius - wall_thickness must be > 0 (got {inner_radius})"
+        )
+
+    center_id = inner_tube_diameter
+    center_od = center_id + 2.0 * inner_tube_wall_thickness
+    center_outer_r = center_od / 2.0
+    center_inner_r = center_id / 2.0
+
+    if center_outer_r >= inner_radius:
+        raise ValueError(
+            f"center tube OD ({center_od:.3f} mm) does not fit within outer ring "
+            f"inner radius ({inner_radius:.3f} mm) — need a positive gap for the connectors"
+        )
+
+    profile_center_x = 0.5
+    profile_center_y = 0.0
+
+    def rotate_around_center(shape):
+        if rotation_z == 0:
+            return shape
+        return (shape.moved(x=-profile_center_x, y=-profile_center_y)
+                   .moved(rz=rotation_z)
+                   .moved(x=profile_center_x, y=profile_center_y))
+
+    outer_ring_base = (face(circle(outer_radius)) - face(circle(inner_radius))).moved(x=0.5)
+    outer_ring = rotate_around_center(outer_ring_base)
+
+    center_tube_base = (face(circle(center_outer_r)) - face(circle(center_inner_r))).moved(x=0.5)
+    center_tube = rotate_around_center(center_tube_base)
+
+    center_top_y = center_outer_r
+    overlap_amount = min(0.15, connector_width * 0.15)
+    max_allowed_y = outer_radius - 0.1
+    connector_top_y = min(inner_radius + overlap_amount, max_allowed_y)
+    connector_bottom_y = max(center_top_y - overlap_amount, -center_outer_r + 0.1)
+    connector_length = connector_top_y - connector_bottom_y
+    connector_center_y = (connector_top_y + connector_bottom_y) / 2.0
+
+    top_connector_base = plane(connector_width, connector_length).moved(x=0.5, y=connector_center_y)
+    top_connector = rotate_around_center(top_connector_base)
+    bottom_connector_base = plane(connector_width, connector_length).moved(x=0.5, y=-connector_center_y)
+    bottom_connector = rotate_around_center(bottom_connector_base)
+
+    result = clean(fuse(outer_ring, center_tube, top_connector, bottom_connector))
+
+    if orient_to_path is not None:
+        face_plane = Plane(origin=orient_to_path.startPoint(), normal=orient_to_path.tangentAt(0))
+        result = result.moved(Location(face_plane))
+
+    return result
+
+
 def create_solid_circle_face(
     outer_radius: float,
     wall_thickness: float,
