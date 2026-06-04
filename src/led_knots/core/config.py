@@ -28,8 +28,9 @@ VALID_FACE_TYPES = (
 
 def _deep_merge_face_settings(base: Dict[str, Any], current: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Merge current over base. Nested dicts (e.g. diffusion_ridges) are merged by key;
-    keys in current override base. 'inherit_from' is not copied into the result.
+    Merge current over base. Nested dicts (e.g. pyramid_studded, braided_rope)
+    are merged by key; keys in current override base. 'inherit_from' is not
+    copied into the result.
     """
     result = dict(base)
     for key, value in current.items():

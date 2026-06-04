@@ -19,7 +19,6 @@ from .pyknot_utils import scale_pyknot_points
 from .path_utils import (
     sample_path_curvature,
     sample_path_for_profiles,
-    sample_path_for_pyramid_profiles,
     compute_optimal_twist_angles,
     build_variable_twist_spine,
     build_ribbon_aux_spine,
@@ -45,7 +44,6 @@ __all__ = [
     'scale_pyknot_points',
     'sample_path_curvature',
     'sample_path_for_profiles',
-    'sample_path_for_pyramid_profiles',
     'compute_optimal_twist_angles',
     'build_variable_twist_spine',
     'build_ribbon_aux_spine',

@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 _FACE_TYPES_WITH_CONNECTORS = frozenset({
     "led_circle",
     "led_circle_tube",
-    "led_circle_diffusion_pyramids",
 })
 
 
@@ -132,10 +131,10 @@ def tag_connector_faces(
             + float(tube_settings.inner_tube_wall_thickness)
         )
     else:
-        # led_circle / _diffusion_pyramids: the oval enclosing the LED
-        # cavity has approximate radial extent = half the long inner side
-        # plus the wall thickness. Conservative — captures the bulk of the
-        # gap even when the actual oval is slightly larger.
+        # led_circle: the oval enclosing the LED cavity has approximate
+        # radial extent = half the long inner side plus the wall
+        # thickness. Conservative — captures the bulk of the gap even
+        # when the actual oval is slightly larger.
         inner_feature_r = (
             float(tube_settings.rect_inner_y) / 2.0
             + float(tube_settings.oval_wall_thickness)
