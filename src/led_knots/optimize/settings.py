@@ -36,6 +36,29 @@ class OrientationSettings:
             )
 
 
+class DrainHoleSettings:
+    """Auto-drill drain/vent holes through trapped resin cavities."""
+
+    def __init__(self, data: Dict[str, Any]):
+        data = data or {}
+        self.enabled: bool = bool(data.get("enabled", False))
+        self.diameter_mm: float = float(data.get("diameter_mm", 1.5))
+        self.min_cavity_volume_mm3: float = float(
+            data.get("min_cavity_volume_mm3", 100.0)
+        )
+        # The drill cylinder extends this far beyond the part's z-extents
+        # on both sides so the boolean cut cleanly punctures top + bottom
+        # walls (a vent at the top breaks suction; a drain at the bottom
+        # lets resin escape under gravity).
+        self.margin_mm: float = float(data.get("margin_mm", 5.0))
+        if self.diameter_mm <= 0:
+            raise ValueError("print_optimization.drain_holes.diameter_mm must be > 0")
+        if self.min_cavity_volume_mm3 < 0:
+            raise ValueError("print_optimization.drain_holes.min_cavity_volume_mm3 must be >= 0")
+        if self.margin_mm < 0:
+            raise ValueError("print_optimization.drain_holes.margin_mm must be >= 0")
+
+
 class PrintOptimizationSettings:
     """Top-level toggles for the SLA/resin print-optimization stage."""
 
@@ -53,6 +76,7 @@ class PrintOptimizationSettings:
                 "print_optimization.overhang_threshold_deg must be in (0, 90)"
             )
         self.orientation = OrientationSettings(data.get("orientation", {}))
+        self.drain_holes = DrainHoleSettings(data.get("drain_holes", {}))
 
     def cache_key_dict(self) -> Dict[str, Any]:
         """
@@ -72,5 +96,11 @@ class PrintOptimizationSettings:
                 "connector_bonus_weight": float(
                     self.orientation.connector_bonus_weight
                 ),
+            },
+            "drain_holes": {
+                "enabled": bool(self.drain_holes.enabled),
+                "diameter_mm": float(self.drain_holes.diameter_mm),
+                "min_cavity_volume_mm3": float(self.drain_holes.min_cavity_volume_mm3),
+                "margin_mm": float(self.drain_holes.margin_mm),
             },
         }

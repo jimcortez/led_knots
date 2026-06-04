@@ -21,7 +21,8 @@ import cadquery as cq
 import numpy as np
 import trimesh
 
-from .analysis import detect_islands, detect_overhangs, detect_trapped_cavities
+from .analysis import Cavity, detect_islands, detect_overhangs, detect_trapped_cavities
+from .drain_holes import drill_drain_holes
 from .face_tagging import FaceTagResult, tag_connector_faces
 from .orient import (
     best_rotation_by_overhang,
@@ -37,6 +38,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "optimize_part",
     "best_orientation_index",
+    "drill_drain_holes",
     "OptimizationReport",
     "OrientationCandidate",
     "PrintOptimizationSettings",
@@ -338,13 +340,28 @@ def optimize_part(
             ]
             dropped = len(annotated) - len(survivors)
             if dropped > 0:
+                bed_dims = (
+                    float(getattr(output_bounds, "width", 0)),
+                    float(getattr(output_bounds, "length", 0)),
+                    float(getattr(output_bounds, "height", 0)),
+                )
                 notes.append(
-                    f"{dropped} of {len(annotated)} candidate(s) dropped — rotated AABB exceeds output_bounds (clearance {bed_clearance_mm}mm)"
+                    f"{dropped} of {len(annotated)} candidate(s) dropped — rotated "
+                    f"AABB exceeds bed {bed_dims[0]:.0f}x{bed_dims[1]:.0f}x{bed_dims[2]:.0f}mm "
+                    f"(clearance {bed_clearance_mm}mm)"
                 )
         else:
             candidates = annotated  # keep extents for reporting
+            bed_dims = (
+                float(getattr(output_bounds, "width", 0)),
+                float(getattr(output_bounds, "length", 0)),
+                float(getattr(output_bounds, "height", 0)),
+            )
             notes.append(
-                "no candidate fits output_bounds; reporting all anyway"
+                f"no candidate fits the configured bed "
+                f"({bed_dims[0]:.0f}x{bed_dims[1]:.0f}x{bed_dims[2]:.0f}mm, "
+                f"clearance {bed_clearance_mm}mm); reporting all anyway. "
+                "Consider enabling max_print_bounds for segmentation."
             )
 
     # Diagnostic warnings (NH1): when no candidate has any flat bed
@@ -402,6 +419,45 @@ def optimize_part(
         report.cavities = detect_trapped_cavities(analysis_mesh)
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("optimize_part: cavity analyzer failed (%r)", exc)
+
+    # Drain-hole drilling (PR 5). Requires:
+    #  - drain_holes.enabled in config
+    #  - orientation actually applied (so build axis = world Z)
+    #  - cavity analyzer succeeded with trapped cavities found
+    drain_settings = getattr(opt_settings, "drain_holes", None)
+    if (
+        drain_settings is not None
+        and drain_settings.enabled
+        and report.applied_candidate is not None
+        and report.cavities is not None
+        and report.cavities.available
+        and report.cavities.trapped_cavities
+    ):
+        try:
+            part, drilled = drill_drain_holes(
+                part, report.cavities.trapped_cavities, drain_settings
+            )
+            report.drilled_cavities = drilled
+            if drilled:
+                # Re-tessellate after drilling so the annotated PNG and
+                # final mesh reflect the holes.
+                try:
+                    analysis_mesh = _to_trimesh(part)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.warning(
+                        "optimize_part: post-drill tessellation failed (%r)", exc
+                    )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("optimize_part: drain hole drilling failed (%r)", exc)
+    elif (
+        drain_settings is not None
+        and drain_settings.enabled
+        and report.applied_candidate is None
+    ):
+        logger.info(
+            "[optimize] drain_holes enabled but skipped — requires --auto-orient "
+            "(build axis = world Z)"
+        )
 
     report.mesh = analysis_mesh
     return part, report

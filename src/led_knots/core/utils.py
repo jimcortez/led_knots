@@ -437,13 +437,24 @@ def draw_part(path, config, aux=None, **face_kwargs):
             )
         else:
             from led_knots.optimize import optimize_part, format_console
+            # Bed-fit reference: prefer max_print_bounds (the user's
+            # explicit printer dimensions) over output_bounds (which is
+            # the path-scaling target and may exclude tube wall thickness).
+            mp = config.max_print_bounds
+            if mp.width > 0 and mp.length > 0 and mp.height > 0:
+                bed_bounds = mp
+                bed_clearance = float(getattr(mp, "clearance_mm", 2.0))
+            else:
+                bed_bounds = config.output_bounds
+                bed_clearance = 2.0
             result, report = optimize_part(
                 result,
                 config.print_optimization,
                 name=config.name or "part",
                 path=path,
                 tube_settings=config.tube_settings,
-                output_bounds=config.output_bounds,
+                output_bounds=bed_bounds,
+                bed_clearance_mm=bed_clearance,
             )
             print(format_console(report, part_name=config.name or "part"))
             report_dir = getattr(config, "optimize_report_dir", None)

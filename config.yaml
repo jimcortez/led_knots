@@ -169,6 +169,16 @@ print_optimization:
     # Tweaker-3's unprintability score by 70%, usually enough to flip the
     # default volume-minimising pick to the connectors-as-supports pose.
     connector_bonus_weight: 0.7
+  drain_holes:
+    # Auto-drill drain (bottom) + vent (top) holes through trapped resin
+    # cavities detected by the analyzer. Requires --auto-orient AND the
+    # cavity detector to be available (manifold3d installed). Disabled by
+    # default — opt in only after the analyzer's cavity report on your
+    # part looks correct.
+    enabled: false
+    diameter_mm: 1.5
+    min_cavity_volume_mm3: 100.0
+    margin_mm: 5.0             # how far the drill cylinder extends past the part Z-extents
 
 # -----------------------------------------------------------------------------
 # Server (cadquery-web-viewer)

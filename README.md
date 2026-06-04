@@ -17,7 +17,7 @@ LED Knots creates parametric 3D models of various mathematical knots and paths, 
 - **Flexible orientation control**: Advanced path curvature analysis and twist optimization
 - **Multiple export formats**: STL, STEP, 3MF, GLB/GLTF support
 - **Web-based preview**: Optional [cadquery-web-viewer](https://pypi.org/project/cadquery-web-viewer/) integration (embedded Flask thread or HTTP to a long-running server)
-- **SLA / resin print optimization**: Detects overhangs, islands, and trapped cavities; auto-rotates parts so the LED-tube radial connectors act as natural support columns. Per-segment rescoring when `max_print_bounds` is enabled. See `print_optimization` in `config.yaml` and the `--optimize` / `--auto-orient` / `--optimize-report-dir` flags.
+- **SLA / resin print optimization**: Detects overhangs, islands, and trapped cavities (ray-cast trap test, requires `manifold3d`); auto-rotates parts so the LED-tube radial connectors act as natural support columns; bed-fit gates orientations against `max_print_bounds`; can auto-drill drain/vent holes through trapped cavities (`print_optimization.drain_holes.enabled`). Per-segment rescoring when `max_print_bounds` is enabled. See `print_optimization` in `config.yaml` and the `--optimize` / `--auto-orient` / `--optimize-report-dir` flags.
 
 ## Installation
 

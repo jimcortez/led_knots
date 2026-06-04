@@ -69,6 +69,10 @@ class OptimizationReport:
     islands: Optional[IslandResult] = None
     cavities: Optional[CavityResult] = None
     connector_tags: Optional[FaceTagResult] = None
+    # Cavities that were physically drilled (drain + vent holes). Empty
+    # when the drain-hole stage was disabled or no trapped cavities were
+    # found at the configured volume threshold.
+    drilled_cavities: List[Any] = field(default_factory=list)
     # Tessellated mesh used by the analyzers (in the orientation the part
     # will be exported in). Stashed so callers can render annotated PNGs
     # without re-tessellating. Not part of the printed report.
@@ -124,6 +128,11 @@ def format_console(report: OptimizationReport, *, part_name: str = "part") -> st
                     f"[optimize]   trapped #{i+1}: {c.volume_mm3:.0f} mm³ @ "
                     f"({c.centroid[0]:+.1f}, {c.centroid[1]:+.1f}, {c.centroid[2]:+.1f}) mm"
                 )
+    if report.drilled_cavities:
+        lines.append(
+            f"[optimize] drilled {len(report.drilled_cavities)} drain/vent hole(s) "
+            f"through trapped cavities"
+        )
     for cand in report.orientation_candidates:
         marker = " *" if (report.applied_candidate is not None and cand.rank == report.applied_candidate.rank) else "  "
         bonus_str = (

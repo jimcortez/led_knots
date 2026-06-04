@@ -1163,6 +1163,7 @@ source = { editable = "." }
 dependencies = [
     { name = "cadquery" },
     { name = "cadquery-web-viewer" },
+    { name = "manifold3d" },
     { name = "matplotlib" },
     { name = "numba" },
     { name = "numpy" },
@@ -1172,6 +1173,7 @@ dependencies = [
     { name = "pyknotid" },
     { name = "pyrender" },
     { name = "pyyaml" },
+    { name = "rtree" },
     { name = "trimesh" },
 ]
 
@@ -1195,6 +1197,7 @@ dev = [
 requires-dist = [
     { name = "cadquery", specifier = ">=2.6.1" },
     { name = "cadquery-web-viewer", editable = "../yet-another-cad-viewer" },
+    { name = "manifold3d", specifier = ">=3.5.1" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "matplotlib", marker = "extra == 'dev'", specifier = ">=3.10.8" },
     { name = "numba", specifier = ">=0.64.0" },
@@ -1207,6 +1210,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "rtree", specifier = ">=1.4.1" },
     { name = "trimesh", specifier = ">=4.0.0" },
 ]
 provides-extras = ["dev"]
@@ -1240,6 +1244,23 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/aa/85/4890a7c14b4fa54400945cb52ac3cd88545bbdb973c440f98ca41591cdc5/llvmlite-0.46.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:3535bd2bb6a2d7ae4012681ac228e5132cdb75fefb1bcb24e33f2f3e0c865ed4", size = 56275176, upload-time = "2025-12-08T18:15:03.936Z" },
     { url = "https://files.pythonhosted.org/packages/6a/07/3d31d39c1a1a08cd5337e78299fca77e6aebc07c059fbd0033e3edfab45c/llvmlite-0.46.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:4cbfd366e60ff87ea6cc62f50bc4cd800ebb13ed4c149466f50cf2163a473d1e", size = 55128630, upload-time = "2025-12-08T18:15:07.196Z" },
     { url = "https://files.pythonhosted.org/packages/2a/6b/d139535d7590a1bba1ceb68751bef22fadaa5b815bbdf0e858e3875726b2/llvmlite-0.46.0-cp312-cp312-win_amd64.whl", hash = "sha256:398b39db462c39563a97b912d4f2866cd37cba60537975a09679b28fbbc0fb38", size = 38138940, upload-time = "2025-12-08T18:15:10.162Z" },
+]
+
+[[package]]
+name = "manifold3d"
+version = "3.5.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e9/6d/df6cccb12ac992b3bcb3cc8208fa9800ad5d2f98cfbcc8ef4ac02a8d306d/manifold3d-3.5.1.tar.gz", hash = "sha256:7562923e94693131c8c1f4ee64baef63dd953447f20f222589d4aba3a1d4febb", size = 306101, upload-time = "2026-06-04T14:16:05.177Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2a/82/2148e8a2c3ee870339a7043f1146f9b3288a07dca22483668e44669fdc96/manifold3d-3.5.1-cp312-cp312-macosx_10_14_universal2.whl", hash = "sha256:7593b0dd8764367821f9bd24347886bad04140bc6b9eb08f5c61f10148cb61e5", size = 1857852, upload-time = "2026-06-04T14:15:21.636Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/8c/b9b8d8adaa9c3d2771ba376e2c54ad5f5c0b1613b0ecc5b1eb2fc716acd2/manifold3d-3.5.1-cp312-cp312-macosx_10_14_x86_64.whl", hash = "sha256:c838e8a577d08c84f59a4b740f5c6c1fee776e121d7716ed026f19ec85604645", size = 1016784, upload-time = "2026-06-04T14:15:23.192Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/79/aff44f1abe583f96f665d6d06cdcc283190a1875930f336c7bd02d8e1550/manifold3d-3.5.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:10c6e829f512594c420e15a39b9643849dd2811b484970b3dd5caf551cfe07cd", size = 888711, upload-time = "2026-06-04T14:15:24.542Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/d2/f7423e856b446bb658c60ac35a0bb3e2828be66b50a369c496aa901788b0/manifold3d-3.5.1-cp312-cp312-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:e0e4ae1a4dd4f95fd9438f7a133036f12c29c3cd84534ef8c556cec125aa5439", size = 1335973, upload-time = "2026-06-04T14:15:25.794Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/05/621d4454f62d579d955efb2b5bcbcfa06dfd7459d765342be8770129b089/manifold3d-3.5.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:849473859fb88d0f53fb3719b026334c8b319a2eedcfd56f53d1409738fa0504", size = 1453016, upload-time = "2026-06-04T14:15:27.156Z" },
+    { url = "https://files.pythonhosted.org/packages/26/91/c4ef7c6d28f9fa71cbf0ad5fcafa6d706744065df7aa6b17256f009fb6cc/manifold3d-3.5.1-cp312-cp312-win_amd64.whl", hash = "sha256:08050488f36e59b39aef320d88dc32d63cdec016824dd3835ef835a2b74580ed", size = 1038017, upload-time = "2026-06-04T14:15:28.875Z" },
 ]
 
 [[package]]
@@ -2060,6 +2081,22 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/6f/ab/d5d5e3bcedb0a77f4f613706b750e50a5a3ba1c15ccd3665ecc636c968fd/rpds_py-0.30.0-cp312-cp312-win32.whl", hash = "sha256:1ab5b83dbcf55acc8b08fc62b796ef672c457b17dbd7820a11d6c52c06839bdf", size = 223782, upload-time = "2025-11-30T20:22:37.271Z" },
     { url = "https://files.pythonhosted.org/packages/39/3b/f786af9957306fdc38a74cef405b7b93180f481fb48453a114bb6465744a/rpds_py-0.30.0-cp312-cp312-win_amd64.whl", hash = "sha256:a090322ca841abd453d43456ac34db46e8b05fd9b3b4ac0c78bcde8b089f959b", size = 240463, upload-time = "2025-11-30T20:22:39.021Z" },
     { url = "https://files.pythonhosted.org/packages/f3/d2/b91dc748126c1559042cfe41990deb92c4ee3e2b415f6b5234969ffaf0cc/rpds_py-0.30.0-cp312-cp312-win_arm64.whl", hash = "sha256:669b1805bd639dd2989b281be2cfd951c6121b65e729d9b843e9639ef1fd555e", size = 230868, upload-time = "2025-11-30T20:22:40.493Z" },
+]
+
+[[package]]
+name = "rtree"
+version = "1.4.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/95/09/7302695875a019514de9a5dd17b8320e7a19d6e7bc8f85dcfb79a4ce2da3/rtree-1.4.1.tar.gz", hash = "sha256:c6b1b3550881e57ebe530cc6cffefc87cd9bf49c30b37b894065a9f810875e46", size = 52425, upload-time = "2025-08-13T19:32:01.413Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/04/d9/108cd989a4c0954e60b3cdc86fd2826407702b5375f6dfdab2802e5fed98/rtree-1.4.1-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:d672184298527522d4914d8ae53bf76982b86ca420b0acde9298a7a87d81d4a4", size = 468484, upload-time = "2025-08-13T19:31:50.593Z" },
+    { url = "https://files.pythonhosted.org/packages/f3/cf/2710b6fd6b07ea0aef317b29f335790ba6adf06a28ac236078ed9bd8a91d/rtree-1.4.1-py3-none-macosx_11_0_arm64.whl", hash = "sha256:a7e48d805e12011c2cf739a29d6a60ae852fb1de9fc84220bbcef67e6e595d7d", size = 436325, upload-time = "2025-08-13T19:31:52.367Z" },
+    { url = "https://files.pythonhosted.org/packages/55/e1/4d075268a46e68db3cac51846eb6a3ab96ed481c585c5a1ad411b3c23aad/rtree-1.4.1-py3-none-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:efa8c4496e31e9ad58ff6c7df89abceac7022d906cb64a3e18e4fceae6b77f65", size = 459789, upload-time = "2025-08-13T19:31:53.926Z" },
+    { url = "https://files.pythonhosted.org/packages/d1/75/e5d44be90525cd28503e7f836d077ae6663ec0687a13ba7810b4114b3668/rtree-1.4.1-py3-none-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:12de4578f1b3381a93a655846900be4e3d5f4cd5e306b8b00aa77c1121dc7e8c", size = 507644, upload-time = "2025-08-13T19:31:55.164Z" },
+    { url = "https://files.pythonhosted.org/packages/fd/85/b8684f769a142163b52859a38a486493b05bafb4f2fb71d4f945de28ebf9/rtree-1.4.1-py3-none-musllinux_1_2_aarch64.whl", hash = "sha256:b558edda52eca3e6d1ee629042192c65e6b7f2c150d6d6cd207ce82f85be3967", size = 1454478, upload-time = "2025-08-13T19:31:56.808Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/a4/c2292b95246b9165cc43a0c3757e80995d58bc9b43da5cb47ad6e3535213/rtree-1.4.1-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:f155bc8d6bac9dcd383481dee8c130947a4866db1d16cb6dff442329a038a0dc", size = 1555140, upload-time = "2025-08-13T19:31:58.031Z" },
+    { url = "https://files.pythonhosted.org/packages/74/25/5282c8270bfcd620d3e73beb35b40ac4ab00f0a898d98ebeb41ef0989ec8/rtree-1.4.1-py3-none-win_amd64.whl", hash = "sha256:efe125f416fd27150197ab8521158662943a40f87acab8028a1aac4ad667a489", size = 389358, upload-time = "2025-08-13T19:31:59.247Z" },
+    { url = "https://files.pythonhosted.org/packages/3f/50/0a9e7e7afe7339bd5e36911f0ceb15fed51945836ed803ae5afd661057fd/rtree-1.4.1-py3-none-win_arm64.whl", hash = "sha256:3d46f55729b28138e897ffef32f7ce93ac335cb67f9120125ad3742a220800f0", size = 355253, upload-time = "2025-08-13T19:32:00.296Z" },
 ]
 
 [[package]]

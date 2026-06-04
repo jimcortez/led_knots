@@ -141,3 +141,55 @@ def test_cavities_unavailable_without_manifold3d() -> None:
     assert res.note is not None
     assert "manifold3d" in res.note.lower()
     assert len(res.cavities) == 0
+
+
+def _require_manifold3d() -> None:
+    try:
+        import manifold3d  # noqa: F401
+    except ImportError:
+        pytest.skip("manifold3d not installed")
+
+
+def test_cavities_detect_sealed_inner_box() -> None:
+    """outer-cube minus inner-cube has a fully enclosed cavity. The
+    26-ray trap test should report it as trapped."""
+    _require_manifold3d()
+    outer = trimesh.creation.box(extents=(40, 40, 40))
+    inner = trimesh.creation.box(extents=(20, 20, 20))
+    sealed = trimesh.boolean.difference([outer, inner], engine="manifold")
+    res = detect_trapped_cavities(sealed)
+    assert res.available is True
+    assert len(res.cavities) == 1
+    cav = res.cavities[0]
+    assert cav.is_trapped is True
+    assert cav.volume_mm3 == pytest.approx(8000.0, rel=0.05)
+
+
+def test_cavities_open_top_cup_is_not_trapped() -> None:
+    """A cup open on top has a cavity in the convex-hull diff, but it's
+    not trapped — rays going upward escape."""
+    _require_manifold3d()
+    outer = trimesh.creation.box(extents=(20, 20, 20)).apply_translation([0, 0, 10])
+    inner = trimesh.creation.box(extents=(16, 16, 16)).apply_translation([0, 0, 12])
+    cup = trimesh.boolean.difference([outer, inner], engine="manifold")
+    res = detect_trapped_cavities(cup)
+    assert res.available is True
+    # The cavity from convex-hull diff is the open top — must be open.
+    assert all(not c.is_trapped for c in res.cavities)
+    assert len(res.trapped_cavities) == 0
+
+
+def test_cavities_l_shape_is_not_trapped() -> None:
+    """An L-shape's convex hull encloses an exterior corner volume that
+    appears in the diff but is NOT a real cavity (it's accessible from
+    outside)."""
+    _require_manifold3d()
+    base = trimesh.creation.box(extents=(40, 40, 5))
+    column = trimesh.creation.box(extents=(10, 40, 30)).apply_translation([15, 0, 17.5])
+    L = trimesh.boolean.union([base, column], engine="manifold")
+    res = detect_trapped_cavities(L)
+    assert res.available is True
+    assert all(not c.is_trapped for c in res.cavities), (
+        "L-shape's convex-hull diff is exterior and should not be tagged as trapped"
+    )
+    assert len(res.trapped_cavities) == 0
