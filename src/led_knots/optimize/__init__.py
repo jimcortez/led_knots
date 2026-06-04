@@ -173,6 +173,70 @@ def best_orientation_index(
     return best_idx
 
 
+def _compute_rotated_extents(mesh: trimesh.Trimesh, R: np.ndarray) -> tuple:
+    """Return ``(extents_x, extents_y, extents_z)`` of the AABB after applying R.
+
+    Cheaper than ``apply_transform`` + ``.bounding_box`` (which copies the
+    full mesh): rotate vertices once and read min/max.
+    """
+    rotated_v = mesh.vertices @ R.T  # equivalent to (R @ v.T).T
+    mn = rotated_v.min(axis=0)
+    mx = rotated_v.max(axis=0)
+    ext = mx - mn
+    return (float(ext[0]), float(ext[1]), float(ext[2]))
+
+
+def _filter_candidates_by_bed(
+    mesh: trimesh.Trimesh,
+    candidates: List[OrientationCandidate],
+    output_bounds,
+    bed_clearance_mm: float = 2.0,
+) -> List[OrientationCandidate]:
+    """Tag each candidate with its rotated extents and drop ones that don't fit.
+
+    Returns the surviving candidates with ``rotated_extents_mm`` and
+    ``fits_bed`` populated. The caller can also keep dropped candidates
+    if every candidate fails — see ``optimize_part`` for that fallback.
+    """
+    if output_bounds is None:
+        return candidates
+    bed = sorted(
+        [
+            float(getattr(output_bounds, "width", math.inf)) - 2.0 * bed_clearance_mm,
+            float(getattr(output_bounds, "length", math.inf)) - 2.0 * bed_clearance_mm,
+            float(getattr(output_bounds, "height", math.inf)) - 2.0 * bed_clearance_mm,
+        ],
+        reverse=True,
+    )
+
+    out: List[OrientationCandidate] = []
+    for cand in candidates:
+        ext = _compute_rotated_extents(mesh, cand.matrix)
+        sorted_ext = sorted(ext, reverse=True)
+        fits = (
+            sorted_ext[0] <= bed[0]
+            and sorted_ext[1] <= bed[1]
+            and sorted_ext[2] <= bed[2]
+        )
+        # OrientationCandidate is frozen — rebuild with the new fields.
+        out.append(
+            OrientationCandidate(
+                rank=cand.rank,
+                matrix=cand.matrix,
+                axis=cand.axis,
+                angle_deg=cand.angle_deg,
+                unprintability=cand.unprintability,
+                bottom_area_mm2=cand.bottom_area_mm2,
+                overhang_area_mm2=cand.overhang_area_mm2,
+                contour_length_mm=cand.contour_length_mm,
+                connector_bonus=cand.connector_bonus,
+                rotated_extents_mm=ext,
+                fits_bed=bool(fits),
+            )
+        )
+    return out
+
+
 def optimize_part(
     part: _PartT,
     opt_settings: PrintOptimizationSettings,
@@ -180,6 +244,8 @@ def optimize_part(
     name: str = "part",
     path=None,
     tube_settings=None,
+    output_bounds=None,
+    bed_clearance_mm: float = 2.0,
 ) -> Tuple[_PartT, OptimizationReport]:
     """
     Analyze a built part for SLA-print problems and (optionally) re-orient it.
@@ -240,10 +306,64 @@ def optimize_part(
             )
         report.connector_tags = connector_tags
 
+    # Bed-fit gate (SF2): drop candidates whose rotated AABB exceeds the
+    # build volume. Annotates the survivors with ``rotated_extents_mm``.
+    # If every candidate fails (e.g. part is too big for the bed in any
+    # orientation), retain the original list with a clear note rather
+    # than silently emitting an empty result.
+    notes: List[str] = []
+    if output_bounds is not None and candidates:
+        annotated = _filter_candidates_by_bed(
+            mesh, candidates, output_bounds, bed_clearance_mm=bed_clearance_mm
+        )
+        survivors = [c for c in annotated if c.fits_bed]
+        if survivors:
+            # Re-rank survivors 1..N (preserves the relative order from
+            # rescoring; this is just renumbering).
+            candidates = [
+                OrientationCandidate(
+                    rank=i + 1,
+                    matrix=c.matrix,
+                    axis=c.axis,
+                    angle_deg=c.angle_deg,
+                    unprintability=c.unprintability,
+                    bottom_area_mm2=c.bottom_area_mm2,
+                    overhang_area_mm2=c.overhang_area_mm2,
+                    contour_length_mm=c.contour_length_mm,
+                    connector_bonus=c.connector_bonus,
+                    rotated_extents_mm=c.rotated_extents_mm,
+                    fits_bed=c.fits_bed,
+                )
+                for i, c in enumerate(survivors)
+            ]
+            dropped = len(annotated) - len(survivors)
+            if dropped > 0:
+                notes.append(
+                    f"{dropped} of {len(annotated)} candidate(s) dropped — rotated AABB exceeds output_bounds (clearance {bed_clearance_mm}mm)"
+                )
+        else:
+            candidates = annotated  # keep extents for reporting
+            notes.append(
+                "no candidate fits output_bounds; reporting all anyway"
+            )
+
+    # Diagnostic warnings (NH1): when no candidate has any flat bed
+    # contact, the optimizer is essentially picking the least-bad among
+    # equally unsupportable poses. Surface this so the user knows
+    # supports are unavoidable, regardless of orientation.
+    if candidates and all(c.bottom_area_mm2 <= 1.0 for c in candidates):
+        notes.append(
+            "all candidates have <=1 mm² bed contact — no defensible flat side; "
+            "supports will be needed regardless of orientation"
+        )
+
+    if notes:
+        report.note = "; ".join(notes)
+
     report.orientation_candidates = candidates
 
     if not candidates:
-        report.note = "Tweaker-3 returned no orientation candidates"
+        report.note = (report.note or "") + " | Tweaker-3 returned no orientation candidates"
         return part, report
 
     if opt_settings.orientation.auto_apply:

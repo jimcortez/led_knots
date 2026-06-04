@@ -140,7 +140,8 @@ class IslandResult:
 def detect_islands(
     mesh: trimesh.Trimesh,
     *,
-    min_area_mm2: float = 0.5,
+    min_area_mm2: Optional[float] = None,
+    min_area_fraction: float = 0.001,
 ) -> IslandResult:
     """Split ``mesh`` into topologically disconnected bodies.
 
@@ -148,7 +149,15 @@ def detect_islands(
     beyond one body means a piece is unanchored. (Per-layer island
     detection — the more common SLA failure — needs a slicer pass and is
     deferred to a future commit.)
+
+    The default minimum-area floor scales with the mesh's total surface
+    area (``min_area_fraction`` of total, default 0.1%) so tessellation
+    fragments and tiny disconnected slivers — e.g. sine_wave's 325
+    pseudo-islands — don't drown the report. Pass an explicit
+    ``min_area_mm2`` to override.
     """
+    if min_area_mm2 is None:
+        min_area_mm2 = max(0.5, float(mesh.area) * float(min_area_fraction))
     submeshes = mesh.split(only_watertight=False)
     components: List[Island] = []
     for sub in submeshes:
@@ -182,7 +191,7 @@ class Cavity:
     volume_mm3: float
     centroid: Tuple[float, float, float]
     bounds: Tuple[Tuple[float, float, float], Tuple[float, float, float]]
-    open_to_bbox_face: bool  # True if cavity touches a bbox face (likely an open end)
+    is_trapped: bool  # ray-casting test: True if all 26 rays from centroid hit the mesh
 
 
 @dataclass(frozen=True)
@@ -193,7 +202,7 @@ class CavityResult:
 
     @property
     def trapped_cavities(self) -> List[Cavity]:
-        return [c for c in self.cavities if not c.open_to_bbox_face]
+        return [c for c in self.cavities if c.is_trapped]
 
 
 def _manifold_available() -> bool:
@@ -204,26 +213,73 @@ def _manifold_available() -> bool:
         return False
 
 
+def _unit_sphere_directions_26() -> np.ndarray:
+    """26 unit vectors covering the cube's faces, edges, and corners.
+
+    Combined: 6 axis-aligned + 12 edge-diagonals + 8 corners = 26 rays.
+    Coverage is dense enough that any directional escape path through
+    a non-convex cavity opening will hit at least one ray's null-result.
+    """
+    s2 = 1.0 / math.sqrt(2.0)
+    s3 = 1.0 / math.sqrt(3.0)
+    dirs: List[Tuple[float, float, float]] = []
+    for sign in (-1.0, 1.0):
+        dirs += [(sign, 0.0, 0.0), (0.0, sign, 0.0), (0.0, 0.0, sign)]
+    for sx in (-1.0, 1.0):
+        for sy in (-1.0, 1.0):
+            dirs.append((sx * s2, sy * s2, 0.0))
+            dirs.append((sx * s2, 0.0, sy * s2))
+            dirs.append((0.0, sx * s2, sy * s2))
+    for sx in (-1.0, 1.0):
+        for sy in (-1.0, 1.0):
+            for sz in (-1.0, 1.0):
+                dirs.append((sx * s3, sy * s3, sz * s3))
+    return np.asarray(dirs, dtype=np.float64)
+
+
+def _is_cavity_trapped(mesh: trimesh.Trimesh, point: np.ndarray) -> bool:
+    """Ray-cast from ``point`` in 26 directions; return True if every ray hits.
+
+    For a watertight, manifold mesh: a point in a *sealed* cavity has the
+    mesh between it and infinity in every direction (every ray hits). A
+    point in an *open* cavity has at least one direction where rays exit
+    without intersecting the mesh.
+
+    We use ``mesh.ray.intersects_id`` (returns one entry per ray hit) and
+    count hits per ray. A ray with zero hits means an escape route.
+    """
+    dirs = _unit_sphere_directions_26()
+    n = len(dirs)
+    origins = np.tile(point, (n, 1))
+    try:
+        # intersects_id returns (index_tri, index_ray) of hits.
+        _, ray_idx = mesh.ray.intersects_id(
+            origins, dirs, multiple_hits=False, return_locations=False
+        )
+    except Exception:  # pragma: no cover - defensive
+        return False
+    hit_rays = set(int(i) for i in ray_idx)
+    return len(hit_rays) == n
+
+
 def detect_trapped_cavities(
     mesh: trimesh.Trimesh,
     *,
     min_volume_mm3: float = 100.0,
-    ignore_open_cavities: bool = True,
-    bbox_open_tolerance_mm: float = 0.5,
 ) -> CavityResult:
-    """Detect internal pockets via ``convex_hull - mesh``.
+    """Detect internal pockets via ``convex_hull - mesh`` + ray-cast trap test.
+
+    The convex-hull difference is only the *first* filter — for non-convex
+    meshes (every knot in this codebase) it also includes huge external
+    concavities that aren't real cavities. The 26-ray trap test on each
+    candidate's centroid is the actual decision: a centroid surrounded by
+    the mesh on all sides is a trapped cavity; anything with an escape
+    direction is not.
 
     Needs ``manifold3d`` for the boolean engine. If it isn't installed,
     returns a ``CavityResult(available=False, note=...)`` so the caller
     can show a one-line "install manifold3d to enable" message without
     failing the run.
-
-    Each cavity is tagged with ``open_to_bbox_face=True`` when its bounding
-    box touches a face of the *mesh's* bounding box within
-    ``bbox_open_tolerance_mm``. That is a coarse heuristic for "this is the
-    open end of a hollow tube, not a sealed pocket". When
-    ``ignore_open_cavities=True``, those are excluded from
-    ``trapped_cavities`` accessors but still present in ``cavities``.
     """
     if not _manifold_available():
         return CavityResult(
@@ -244,21 +300,17 @@ def detect_trapped_cavities(
         return CavityResult(available=True, cavities=[])
 
     if not isinstance(diff, trimesh.Trimesh):
-        # Older trimesh returns a list-like in some cases.
         merged = trimesh.util.concatenate(list(diff))
         diff = merged
 
-    mesh_bounds = mesh.bounds  # (2, 3)
     cavities: List[Cavity] = []
     for piece in diff.split(only_watertight=False):
         vol = float(piece.volume) if piece.is_volume else 0.0
         if vol < min_volume_mm3:
             continue
         mn, mx = piece.bounds
-        touches_min = np.any(np.abs(mn - mesh_bounds[0]) < bbox_open_tolerance_mm)
-        touches_max = np.any(np.abs(mx - mesh_bounds[1]) < bbox_open_tolerance_mm)
-        open_to_bbox = bool(touches_min or touches_max)
         c = piece.centroid
+        is_trapped = _is_cavity_trapped(mesh, np.asarray(c, dtype=np.float64))
         cavities.append(
             Cavity(
                 volume_mm3=vol,
@@ -267,15 +319,15 @@ def detect_trapped_cavities(
                     (float(mn[0]), float(mn[1]), float(mn[2])),
                     (float(mx[0]), float(mx[1]), float(mx[2])),
                 ),
-                open_to_bbox_face=open_to_bbox,
+                is_trapped=is_trapped,
             )
         )
     cavities.sort(key=lambda x: x.volume_mm3, reverse=True)
+    open_n = sum(1 for c in cavities if not c.is_trapped)
     note = None
-    if ignore_open_cavities and any(c.open_to_bbox_face for c in cavities):
-        open_n = sum(1 for c in cavities if c.open_to_bbox_face)
+    if open_n > 0:
         note = (
-            f"{open_n} cavity(ies) touch the bounding box — likely open tube ends; "
-            f"not reported as trapped"
+            f"{open_n} candidate(s) had an escape route by ray-cast and were "
+            f"classified as open (not trapped)"
         )
     return CavityResult(available=True, cavities=cavities, note=note)

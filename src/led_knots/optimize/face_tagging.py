@@ -75,7 +75,7 @@ def tag_connector_faces(
     *,
     num_path_samples: int = 200,
     azimuthal_alignment_threshold: float = 0.7,
-    min_radial_clearance_mm: float = 0.05,
+    min_radial_clearance_mm: float = 0.5,
 ) -> FaceTagResult:
     """Mark faces whose normal points along the cross-section's azimuthal axis.
 

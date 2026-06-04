@@ -443,6 +443,7 @@ def draw_part(path, config, aux=None, **face_kwargs):
                 name=config.name or "part",
                 path=path,
                 tube_settings=config.tube_settings,
+                output_bounds=config.output_bounds,
             )
             print(format_console(report, part_name=config.name or "part"))
             report_dir = getattr(config, "optimize_report_dir", None)

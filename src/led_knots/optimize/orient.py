@@ -163,42 +163,6 @@ def rescore_candidates_with_connector_bonus(
     ]
 
 
-def _axis_angle_from_matrix(matrix: np.ndarray) -> tuple:
-    """
-    Decompose a 3x3 rotation matrix into (axis, angle_rad).
-
-    Tweaker-3 already provides the axis+angle directly, but for the
-    near-identity case (``alignment ≈ [0,0,1]``) its ``euler`` helper
-    returns ``angle=0`` with an arbitrary axis; we keep its values intact
-    and only use this helper as a sanity fallback if needed.
-    """
-    cos_a = (np.trace(matrix) - 1.0) / 2.0
-    cos_a = max(-1.0, min(1.0, cos_a))
-    angle = math.acos(cos_a)
-    if angle < 1e-9:
-        return (1.0, 0.0, 0.0), 0.0
-    if math.isclose(angle, math.pi, abs_tol=1e-6):
-        # Pick the largest diagonal element to extract axis stably.
-        diag = np.array([matrix[0, 0], matrix[1, 1], matrix[2, 2]])
-        i = int(np.argmax(diag))
-        v = np.zeros(3)
-        v[i] = math.sqrt(max(0.0, (matrix[i, i] + 1.0) / 2.0))
-        for j in range(3):
-            if j == i:
-                continue
-            v[j] = matrix[i, j] / (2.0 * v[i]) if v[i] != 0 else 0.0
-        n = float(np.linalg.norm(v))
-        if n > 0:
-            v = v / n
-        return (float(v[0]), float(v[1]), float(v[2])), float(angle)
-    axis = np.array([
-        matrix[2, 1] - matrix[1, 2],
-        matrix[0, 2] - matrix[2, 0],
-        matrix[1, 0] - matrix[0, 1],
-    ]) / (2.0 * math.sin(angle))
-    return (float(axis[0]), float(axis[1]), float(axis[2])), float(angle)
-
-
 def find_best_orientations(
     mesh: trimesh.Trimesh,
     *,
@@ -239,16 +203,15 @@ def find_best_orientations(
     for rank_idx in range(n):
         row = all_results[rank_idx]
         alignment = np.array([row[0], row[1], row[2]], dtype=np.float64)
-        _, angle_rad, matrix = tweak.euler(alignment.tolist())
+        # Use Tweaker-3's axis directly — it returns the same (axis, angle)
+        # pair it used to build the matrix, so cq.Solid.rotate(axis, angle)
+        # is guaranteed consistent with the matrix used by the analyzers.
+        # Re-deriving via a separate matrix decomposition risked sign
+        # flips at angle=π and the two transforms drifting apart.
+        axis_list, angle_rad, matrix = tweak.euler(alignment.tolist())
         matrix = np.asarray(matrix, dtype=np.float64)
-
-        if angle_rad < 1e-9:
-            axis = (1.0, 0.0, 0.0)
-            angle_deg = 0.0
-        else:
-            axis_calc, angle_calc = _axis_angle_from_matrix(matrix)
-            axis = axis_calc
-            angle_deg = math.degrees(angle_calc)
+        axis = (float(axis_list[0]), float(axis_list[1]), float(axis_list[2]))
+        angle_deg = math.degrees(angle_rad)
 
         candidates.append(
             OrientationCandidate(

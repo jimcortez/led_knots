@@ -53,6 +53,10 @@ class OrientationCandidate:
     overhang_area_mm2: float
     contour_length_mm: float
     connector_bonus: float = 0.0
+    # Rotated-mesh AABB extents (mm), if computed by the bed-fit filter.
+    # Useful for reporting "fits 196x84x30 mm bed" without re-rotating.
+    rotated_extents_mm: Optional[Tuple[float, float, float]] = None
+    fits_bed: Optional[bool] = None
 
 
 @dataclass
@@ -127,12 +131,17 @@ def format_console(report: OptimizationReport, *, part_name: str = "part") -> st
             if cand.connector_bonus > 0.0
             else ""
         )
+        bed_str = ""
+        if cand.rotated_extents_mm is not None:
+            ex, ey, ez = cand.rotated_extents_mm
+            fit_marker = "" if cand.fits_bed in (True, None) else "*FAIL*"
+            bed_str = f"  AABB={ex:.0f}×{ey:.0f}×{ez:.0f}mm{fit_marker}"
         lines.append(
             f"[optimize] {marker}rank={cand.rank} "
             f"unprintability={cand.unprintability:8.3f}  "
             f"bottom={cand.bottom_area_mm2:7.1f} mm²  "
             f"overhang={cand.overhang_area_mm2:7.1f} mm²"
-            f"{bonus_str}  "
+            f"{bonus_str}{bed_str}  "
             f"{_axis_angle_str(cand.axis, cand.angle_deg)}"
         )
     if report.applied_candidate is None and report.orientation_candidates:
