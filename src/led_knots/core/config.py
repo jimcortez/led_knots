@@ -16,7 +16,14 @@ from led_knots.optimize.settings import PrintOptimizationSettings
 logger = logging.getLogger(__name__)
 
 # Face types allowed for top-level face_type and in face_settings keys.
-VALID_FACE_TYPES = ('led_circle', 'led_circle_diffusion_pyramids', 'led_circle_tube', 'solid_circle', 'solid_circle_pyramid', 'square')
+VALID_FACE_TYPES = (
+    'led_circle',
+    'led_circle_tube',
+    'solid_circle',
+    'square',
+    'pyramid_studded',
+    'braided_rope',
+)
 
 
 def _deep_merge_face_settings(base: Dict[str, Any], current: Dict[str, Any]) -> Dict[str, Any]:
@@ -287,24 +294,20 @@ class TubeSettings:
         itwt = data.get('inner_tube_wall_thickness')
         self.inner_tube_wall_thickness = float(itwt) if itwt is not None else None
 
-        diffusion_ridges_data = data.get('diffusion_ridges')
-        if diffusion_ridges_data is False or diffusion_ridges_data is None:
-            self.diffusion_ridges = None
-        elif isinstance(diffusion_ridges_data, dict):
-            ridge_height = float(diffusion_ridges_data.get('ridge_height', 0.5))
-            self.diffusion_ridges = {
-                'ridge_height': ridge_height,
-                'ridge_width': float(diffusion_ridges_data.get('ridge_width', 1.0)),
-                'ridge_spacing': float(diffusion_ridges_data.get('ridge_spacing', 0.0)),
-                'ridge_depth': float(diffusion_ridges_data.get('ridge_depth', ridge_height)),
-            }
+        # Per-model config blocks. Each tube model pulls the dict it cares about
+        # out of the resolved face_settings entry (which has already had
+        # `inherit_from` applied by `resolve_face_settings`).
+        pyr = data.get('pyramid_studded')
+        if isinstance(pyr, dict):
+            self.pyramid_studded = {str(k): v for k, v in pyr.items()}
         else:
-            self.diffusion_ridges = {
-                'ridge_height': 0.5,
-                'ridge_width': 1.0,
-                'ridge_spacing': 0.0,
-                'ridge_depth': 0.5,
-            }
+            self.pyramid_studded = None
+
+        br = data.get('braided_rope')
+        if isinstance(br, dict):
+            self.braided_rope = {str(k): v for k, v in br.items()}
+        else:
+            self.braided_rope = None
 
     @property
     def outer_radius(self) -> float:
@@ -331,8 +334,6 @@ class TubeSettings:
             'rect_inner_x': self.rect_inner_x,
             'rect_inner_y': self.rect_inner_y,
         }
-        if self.diffusion_ridges is not None:
-            base_kwargs['diffusion_ridges'] = self.diffusion_ridges
         base_kwargs.update(kwargs)
         return base_kwargs
 

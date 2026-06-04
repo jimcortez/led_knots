@@ -202,44 +202,19 @@ def sample_path_for_profiles(path, num_samples: int = 50) -> list:
     """
     Sample the path for multisection sweep profile placement.
 
-    Returns position, tangent, and arc length at each sample point for creating
-    profiles that coincide with the path.
+    Delegates to `path_frames.sample_path_frames` so every sample dict carries
+    the parallel-transported `x_dir` / `y_dir` basis used by the tube models.
 
     Args:
         path: A CadQuery Wire or Edge representing the sweep path
         num_samples: Number of sample points along the path (default: 50)
 
     Returns:
-        List of dicts, each containing:
-          - t: parameter value (0 to 1)
-          - point: CadQuery Vector (path.positionAt(t))
-          - tangent: CadQuery Vector (path.tangentAt(t))
-          - arc_length: cumulative arc length from start to this point (chord-length approx)
+        List of dicts, each containing t, point, tangent, x_dir, y_dir, arc_length.
     """
-    samples = []
-    cumulative_arc = 0.0
-    prev_pos = None
+    from .path_frames import sample_path_frames, frame_to_dict
 
-    for i in range(num_samples):
-        t = i / (num_samples - 1) if num_samples > 1 else 1.0
-
-        point = path.positionAt(t)
-        tangent_vec = path.tangentAt(t)
-
-        if prev_pos is not None:
-            curr_arr = np.array([point.x, point.y, point.z])
-            prev_arr = np.array([prev_pos.x, prev_pos.y, prev_pos.z])
-            cumulative_arc += float(np.linalg.norm(curr_arr - prev_arr))
-        prev_pos = point
-
-        samples.append({
-            't': t,
-            'point': point,
-            'tangent': tangent_vec,
-            'arc_length': cumulative_arc,
-        })
-
-    return samples
+    return [frame_to_dict(f) for f in sample_path_frames(path, num_samples)]
 
 
 def sample_path_for_pyramid_profiles(
@@ -299,17 +274,16 @@ def sample_path_for_pyramid_profiles(
                 return t_lo
         return 1.0
 
+    from .path_frames import sample_path_frames, frame_at_arc_length, frame_to_dict
+
+    # Build a dense parallel-transported frame table once, then look up each
+    # pyramid-aligned arc-length position. Keeps x_dir/y_dir consistent with
+    # `sample_path_for_profiles` so downstream pyramid math sees the same basis.
+    dense_frames = sample_path_frames(path, dense_samples)
     samples = []
     for s_val in s_values:
-        t = _t_for_arc_length(s_val)
-        point = path.positionAt(t)
-        tangent = path.tangentAt(t)
-        samples.append({
-            't': t,
-            'point': point,
-            'tangent': tangent,
-            'arc_length': s_val,
-        })
+        frame = frame_at_arc_length(dense_frames, s_val)
+        samples.append(frame_to_dict(frame))
 
     return samples
 

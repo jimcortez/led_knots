@@ -20,15 +20,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 import cadquery as cq
-from cadquery.func import Plane, Location, sweep
-from .led_circle import (
-    _pyramid_ridge_height_at_t,
-    create_led_circle_face,
-    create_led_circle_tube_face,
-    create_solid_circle_face,
-    create_square_face,
-)
-from .path_utils import sample_path_for_profiles, sample_path_for_pyramid_profiles
 from .print_segmentation import build_segmented_tube_assembly
 
 logger = logging.getLogger(__name__)
@@ -184,161 +175,22 @@ def render_part(
 
 def build_tube_from_path(path, config, aux=None, face_kwargs: Optional[dict] = None):
     """
-    Build (sweep) the tube solid from a path using the configured face type.
+    Build the 3D tube geometry for `path` using the configured tube model.
 
-    This is the shared geometry builder used by `draw_part`, and can also be used
-    by callers that want to post-process the tube solid into an assembly.
+    Resolves `config.tube_settings.face_type` against the tube-model registry
+    (see `core/tube_models/__init__.py`) and delegates the build. Used by
+    `draw_part` and by callers that want to post-process the geometry into an
+    assembly.
     """
-    face_kwargs_dict = face_kwargs or {}
-    face_type = config.tube_settings.face_type
-    face_kw = config.tube_settings.to_led_circle_face_kwargs(
-        orient_to_path=path,
-        **face_kwargs_dict,
+    from .tube_models import get_tube_model
+
+    model = get_tube_model(config.tube_settings.face_type)
+    return model.build(
+        path=path,
+        aux=aux,
+        config=config,
+        face_kwargs=face_kwargs or {},
     )
-
-    if face_type == 'led_circle_diffusion_pyramids':
-        num_samples = 30
-        samples = sample_path_for_profiles(path, num_samples=num_samples)
-        path_length = samples[-1]['arc_length'] if samples else 0.0
-
-        dr = config.tube_settings.diffusion_ridges
-        if not dr:
-            raise ValueError("led_circle_diffusion_pyramids requires diffusion_ridges in config")
-        ridge_width = dr['ridge_width']
-        ridge_spacing = dr['ridge_spacing']
-        ridge_depth = dr['ridge_depth']
-
-        n_samples = len(samples)
-        logger.debug(
-            "build_tube_from_path (led_circle_diffusion_pyramids): building %d section faces, "
-            "path_length=%.2f mm",
-            n_samples,
-            path_length,
-        )
-
-        faces = []
-        min_ridge = max(0.5, ridge_depth * 0.2)
-        for idx, sample in enumerate(samples):
-            t = sample['t']
-            ridge_height = max(
-                min_ridge,
-                _pyramid_ridge_height_at_t(
-                    t, path_length, ridge_width, ridge_spacing, ridge_depth
-                ),
-            )
-            dr_at_t = {**dr, 'ridge_height': ridge_height}
-            face_kw_at_t = {**face_kw, 'orient_to_path': None, 'diffusion_ridges': dr_at_t}
-            face_i = create_led_circle_face(**face_kw_at_t)
-            plane = Plane(origin=sample['point'], normal=sample['tangent'])
-            face_i = face_i.moved(Location(plane))
-            # Sort faces by area (descending) for consistent ordering across sections.
-            sorted_faces = sorted(face_i.faces(), key=lambda f: f.Area(), reverse=True)
-            from cadquery.func import compound
-            face_i = compound(sorted_faces)
-            faces.append(face_i)
-            step = max(1, n_samples // 10)
-            if (
-                n_samples <= 20
-                or idx == 0
-                or idx == n_samples - 1
-                or (idx + 1) % step == 0
-            ):
-                logger.debug(
-                    "build_tube_from_path (led_circle_diffusion_pyramids): face %d/%d",
-                    idx + 1,
-                    n_samples,
-                )
-
-        logger.debug(
-            "build_tube_from_path (led_circle_diffusion_pyramids): calling sweep (%d faces)",
-            len(faces),
-        )
-        try:
-            return sweep(faces, path, aux=aux)
-        except Exception as e:
-            raise RuntimeError(
-                f"led_circle_diffusion_pyramids multisection sweep failed: {e!r}. "
-                f"num_sections={len(faces)}, path_length={path_length:.1f}mm, "
-                f"ridge_depth={ridge_depth}, ridge_width={ridge_width}, ridge_spacing={ridge_spacing}"
-            ) from e
-
-    if face_type == 'solid_circle_pyramid':
-        dr = config.tube_settings.diffusion_ridges or {}
-        ridge_width = dr.get('ridge_width', 2.0)
-        ridge_spacing = dr.get('ridge_spacing', 1.0)
-        ridge_depth = dr.get('ridge_depth', 2.5)
-        pitch = ridge_width + ridge_spacing
-        sections_per_pyramid = 5
-
-        samples = sample_path_for_pyramid_profiles(
-            path, pitch=pitch, sections_per_pyramid=sections_per_pyramid
-        )
-        path_length = samples[-1]['arc_length']
-        num_pyramids = path_length / pitch
-        logger.info(
-            "solid_circle_pyramid: %d sections, %.1f mm path, ~%.0f pyramids (pitch=%.1f mm)",
-            len(samples), path_length, num_pyramids, pitch,
-        )
-        base_radius = config.tube_settings.outer_radius
-
-        n_sections = len(samples)
-        logger.debug(
-            "build_tube_from_path (solid_circle_pyramid): building %d section faces, "
-            "path_length=%.2f mm",
-            n_sections,
-            path_length,
-        )
-
-        faces = []
-        for idx, sample in enumerate(samples):
-            t = sample['t']
-            bulge = _pyramid_ridge_height_at_t(t, path_length, ridge_width, ridge_spacing, ridge_depth)
-            radius = base_radius + bulge
-            face_i = create_solid_circle_face(
-                outer_radius=radius,
-                wall_thickness=face_kw.get('wall_thickness', 1.0),
-                orient_to_path=None,
-            )
-            plane = Plane(origin=sample['point'], normal=sample['tangent'])
-            face_i = face_i.moved(Location(plane))
-            faces.append(face_i)
-            step = max(1, n_sections // 10)
-            if (
-                n_sections <= 20
-                or idx == 0
-                or idx == n_sections - 1
-                or (idx + 1) % step == 0
-            ):
-                logger.debug(
-                    "build_tube_from_path (solid_circle_pyramid): face %d/%d",
-                    idx + 1,
-                    n_sections,
-                )
-
-        logger.debug(
-            "build_tube_from_path (solid_circle_pyramid): calling sweep (%d faces)",
-            len(faces),
-        )
-        return sweep(faces, path, aux=aux)
-
-    if face_type == 'led_circle_tube':
-        tube_kw = config.tube_settings.to_led_circle_tube_face_kwargs(
-            orient_to_path=path,
-            **face_kwargs_dict,
-        )
-        logger.debug("build_tube_from_path (led_circle_tube): calling sweep (single profile)")
-        return sweep(create_led_circle_tube_face(**tube_kw), path, aux=aux)
-    if face_type == 'led_circle':
-        logger.debug("build_tube_from_path (led_circle): calling sweep (single profile)")
-        return sweep(create_led_circle_face(**face_kw), path, aux=aux)
-    if face_type == 'solid_circle':
-        logger.debug("build_tube_from_path (solid_circle): calling sweep (single profile)")
-        return sweep(create_solid_circle_face(**face_kw), path, aux=aux)
-    if face_type == 'square':
-        logger.debug("build_tube_from_path (square): calling sweep (single profile)")
-        return sweep(create_square_face(**face_kw), path, aux=aux)
-
-    raise ValueError(f"Unknown face_type: {face_type!r}")
 
 
 def maybe_export_named_parts(named_parts: Dict[str, object], config) -> None:

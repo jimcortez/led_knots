@@ -15,8 +15,8 @@ output_bounds:
   length: 110   # mm
   height: 200     # mm
 
-# Active cross-section face: led_circle | led_circle_diffusion_pyramids |
-# led_circle_tube | solid_circle | solid_circle_pyramid | square
+# Active tube model: led_circle | led_circle_tube | solid_circle | square |
+# pyramid_studded | braided_rope
 face_type: led_circle_tube
 
 # -----------------------------------------------------------------------------
@@ -32,20 +32,6 @@ face_settings:
     rect_inner_y: 11.0      # mm – inner cavity Y (e.g. strip width + tolerance)
     oval_wall_thickness: 0.5   # mm – wall around oval cavity
     connector_width: 0.5       # mm – width of connectors to center oval
-    diffusion_ridges: false
-
-  led_circle_with_ridges:
-    outer_diameter: 30      # mm – tube outer diameter
-    wall_thickness: 1.0     # mm – outer ring wall thickness
-    rect_inner_x: 4.6       # mm – inner cavity X (e.g. strip height×2 + tolerance)
-    rect_inner_y: 11.0      # mm – inner cavity Y (e.g. strip width + tolerance)
-    oval_wall_thickness: 0.5   # mm – wall around oval cavity
-    connector_width: 0.5       # mm – width of connectors to center oval
-    diffusion_ridges:
-      ridge_height: 2.5    # mm
-      ridge_width: 2.0     # mm – horizontal size
-      ridge_spacing: 1      # mm
-      ridge_depth: 2.5     # mm – peak height of pyramid along path
 
   led_circle_tube:
     outer_diameter: 30              # mm – tube outer diameter
@@ -54,28 +40,42 @@ face_settings:
     inner_tube_wall_thickness: 0.5  # mm – wall around the central tube
     connector_width: 0.5            # mm – width of connectors to center tube
 
-  led_circle_diffusion_pyramids:
-    inherit_from: led_circle
-    diffusion_ridges:
-      ridge_height: 3.0    # mm – override; pyramids use this along path
-      ridge_width: 2.0     # mm
-      ridge_spacing: 1     # mm
-      ridge_depth: 2.5    # mm
-
   solid_circle:
     inherit_from: led_circle
     outer_diameter: 30      # mm – tube outer diameter
 
-  solid_circle_pyramid:
-    inherit_from: solid_circle
-    wall_thickness: 1.0    # mm
-    diffusion_ridges:
-      ridge_width: 2.0     # mm
-      ridge_spacing: 1     # mm
-      ridge_depth: 2.5     # mm
-
   square:
-    outer_width: 30        # mm – side length of square
+    outer_width: 30         # mm – side length of square
+
+  # Real 3D pyramidal studs on the outer surface of a base swept tube.
+  # All `base_face_type` parameters (outer_diameter, wall_thickness, ...) are
+  # inherited so the same configuration drives both the base tube and the studs.
+  pyramid_studded:
+    inherit_from: solid_circle
+    pyramid_studded:
+      base_face_type: solid_circle   # which smooth tube the studs sit on
+      base_size: 2.0                 # mm – pyramid base edge length (square)
+      height: 2.5                    # mm – apex distance above the outer surface
+      axial_pitch: 4.0               # mm – distance between rows along the path
+      axial_margin: 4.0              # mm – skip-zone at each end of the path
+      circumferential_count: 12      # studs around the perimeter per row
+      stagger_rows: true             # rotate every other row by half a stud
+      embed_depth: 0.3               # mm – sink base into the tube wall for clean fusion
+
+  # Braided-rope sleeve along the path (Step 4).
+  braided_rope:
+    inherit_from: solid_circle
+    braided_rope:
+      num_strands_per_dir: 25        # total strands = 2 × this
+      float_length: 1                # F: 1=1×1 diamond, 2=2×2 regular, n×n
+      helix_angle_deg: 30.0
+      strand_aspect_ratio: 1.6       # 1.0 = circular strand cross-section
+      tilt_to_helix_angle: true      # align ellipse major axis to braid direction
+      weave_amplitude_factor: 1.05
+      pack_factor: 0.7
+      samples_per_period: 20
+      strand_start: 2.0              # mm – trim from path start
+      strand_end_offset: 2.0         # mm – trim from path end
 
 # -----------------------------------------------------------------------------
 # Path / twist limits

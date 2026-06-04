@@ -220,29 +220,6 @@ def _validate_led_circle_face_geometry(
     return not has_errors
 
 
-def _pyramid_ridge_height_at_t(
-    t: float,
-    path_length: float,
-    ridge_width: float,
-    ridge_spacing: float,
-    ridge_depth: float,
-) -> float:
-    """
-    Ridge height at path parameter t (0..1). Triangular wave: 0 -> peak -> 0.
-
-    Creates pyramid-shaped ridges along the path. Each pyramid has base width
-    ridge_width and spacing ridge_spacing; ridge_depth is the peak height.
-    """
-    pitch = ridge_width + ridge_spacing
-    if pitch <= 0:
-        return ridge_depth
-    s = t * path_length  # arc position along path
-    pos_in_pitch = (s % pitch) / pitch  # 0..1 within one pyramid
-    if pos_in_pitch <= 0.5:
-        return 2 * pos_in_pitch * ridge_depth  # ramp up
-    return 2 * (1 - pos_in_pitch) * ridge_depth  # ramp down
-
-
 def create_led_circle_face(
     outer_radius: float,
     wall_thickness: float,
@@ -253,7 +230,6 @@ def create_led_circle_face(
     connector_width: float = 1.0,
     orient_to_path: Wire = None,
     rotation_z: float = 90.0,
-    diffusion_ridges: dict = None,
 ):
     """
     Create a 2D LED circle cross-section using the CadQuery functional API.
@@ -280,10 +256,7 @@ def create_led_circle_face(
         orient_to_path: If provided (Wire object), orient the result to the path's start point and tangent.
                         The result will be positioned at the path's start point with the normal aligned to the path's tangent.
         rotation_z: Rotation angle in degrees around Z axis (around profile center). Default: 90.0
-        diffusion_ridges: Optional dict with keys 'ridge_height', 'ridge_width', 'ridge_spacing' in mm.
-                         If None or False, no ridges are added. If provided, ridges are added as triangles
-                         on the outside of the oval following its curvature.
-        
+
     Returns:
         Face or Compound representing the complete 2D cross-section ready for sweeping
     """
@@ -509,152 +482,8 @@ def create_led_circle_face(
     bottom_connector_base = plane(connector_width, connector_top_length).moved(x=0.5, y=-connector_top_center_y)
     bottom_connector = rotate_around_center(bottom_connector_base)
     
-    # Generate diffusion ridges if configured
-    ridge_faces = []
-    if diffusion_ridges is not None:
-        ridge_height = diffusion_ridges.get('ridge_height', 0.5)
-        ridge_width = diffusion_ridges.get('ridge_width', 1.0)
-        ridge_spacing = diffusion_ridges.get('ridge_spacing', 0.0)
-        
-        if ridge_height > 0 and ridge_width > 0:
-            # Calculate ellipse perimeter (approximate using Ramanujan's formula)
-            # For ellipse with semi-axes a and b: perimeter ≈ π * sqrt(2 * (a² + b²))
-            # More accurate: π * (3(a + b) - sqrt((3a + b)(a + 3b)))
-            a = oval_semi_x
-            b = oval_semi_y
-            # Using Ramanujan's second approximation for better accuracy
-            h = ((a - b) / (a + b)) ** 2 if (a + b) > 0 else 0
-            ellipse_perimeter = math.pi * (a + b) * (1 + (3 * h) / (10 + math.sqrt(4 - 3 * h)))
-            
-            # Helper function to calculate arc length element for ellipse
-            # For ellipse parameterized as (a*cos(t), b*sin(t)):
-            # ds/dt = sqrt((dx/dt)² + (dy/dt)²) = sqrt(a²sin²(t) + b²cos²(t))
-            def arc_length_element(t):
-                sin_t = math.sin(t)
-                cos_t = math.cos(t)
-                return math.sqrt((a * sin_t)**2 + (b * cos_t)**2)
-            
-            # Helper function to find the parameter t2 such that arc length from t1 to t2 equals target_length
-            # Uses numerical integration with adaptive step size and binary search refinement
-            def find_arc_length_endpoint(t1, target_length, tolerance=1e-6):
-                # Initial estimate using arc length element at t1
-                ds1 = arc_length_element(t1)
-                if ds1 <= 0:
-                    return t1 + 0.01  # Fallback
-                
-                # Initial guess: assume constant ds/dt (first order approximation)
-                t2_guess = t1 + target_length / ds1
-                
-                # Refine using binary search
-                t_low = t1
-                t_high = t1 + 2 * target_length / ds1  # Upper bound
-                
-                # Numerical integration to find exact t2
-                for _ in range(20):  # Max iterations
-                    t_mid = (t_low + t_high) / 2.0
-                    
-                    # Calculate arc length from t1 to t_mid using Simpson's rule
-                    # Use 10 subintervals for accuracy
-                    n_segments = 10
-                    dt = (t_mid - t1) / n_segments
-                    arc_length = 0.0
-                    
-                    for j in range(n_segments):
-                        t_start = t1 + j * dt
-                        t_end = t_start + dt
-                        ds_start = arc_length_element(t_start)
-                        ds_mid = arc_length_element((t_start + t_end) / 2.0)
-                        ds_end = arc_length_element(t_end)
-                        # Simpson's rule: (f(a) + 4f((a+b)/2) + f(b)) * (b-a) / 6
-                        segment_length = (ds_start + 4 * ds_mid + ds_end) * dt / 6.0
-                        arc_length += segment_length
-                    
-                    if abs(arc_length - target_length) < tolerance:
-                        return t_mid
-                    elif arc_length < target_length:
-                        t_low = t_mid
-                    else:
-                        t_high = t_mid
-                
-                return (t_low + t_high) / 2.0
-            
-            # Calculate number of ridges based on actual circumference
-            # Use the actual ellipse perimeter (circumference)
-            ridge_pitch = ridge_width + ridge_spacing
-            if ridge_pitch > 0:
-                num_ridges = max(1, int(ellipse_perimeter / ridge_pitch))
-            else:
-                num_ridges = max(1, int(ellipse_perimeter / ridge_width))
-            
-            # Generate ridges around the ellipse
-            # The ellipse is centered at (0.5, 0) with semi-axes oval_semi_x and oval_semi_y
-            oval_center_x = 0.5
-            oval_center_y = 0.0
-            
-            # Position ridges sequentially to ensure proper spacing
-            # Start at t = 0, and for each ridge, calculate where its base ends
-            # The next ridge starts where the previous one ended (plus spacing)
-            current_t = 0.0
-            
-            for i in range(num_ridges):
-                # Calculate base points: t1 is current position, t2 is where ridge_width arc length ends
-                t1 = current_t
-                t2 = find_arc_length_endpoint(t1, ridge_width)
-                
-                # Center of ridge base (for calculating normal and top point)
-                t_center = (t1 + t2) / 2.0
-                
-                # Calculate point on ellipse at center of ridge base
-                point_x = oval_center_x + a * math.cos(t_center)
-                point_y = oval_center_y + b * math.sin(t_center)
-                
-                # Calculate normal vector at center (pointing outward)
-                nx = math.cos(t_center) / a if a > 0 else 0
-                ny = math.sin(t_center) / b if b > 0 else 0
-                norm_length = math.sqrt(nx * nx + ny * ny)
-                if norm_length > 0:
-                    nx /= norm_length
-                    ny /= norm_length
-                
-                # Calculate base points on ellipse
-                base_p1_x = oval_center_x + a * math.cos(t1)
-                base_p1_y = oval_center_y + b * math.sin(t1)
-                base_p2_x = oval_center_x + a * math.cos(t2)
-                base_p2_y = oval_center_y + b * math.sin(t2)
-                
-                # Calculate top point (extending outward by ridge_height along normal)
-                top_x = point_x + ridge_height * nx
-                top_y = point_y + ridge_height * ny
-                
-                # Move to next ridge position: end of current base + spacing
-                if i < num_ridges - 1:  # Don't calculate spacing after last ridge
-                    if ridge_spacing > 0:
-                        current_t = find_arc_length_endpoint(t2, ridge_spacing)
-                    else:
-                        current_t = t2
-                
-                # Create triangle from the three points
-                # Points: base_p1, base_p2, top (in order to form a triangle)
-                triangle_points = [
-                    (base_p1_x, base_p1_y),
-                    (base_p2_x, base_p2_y),
-                    (top_x, top_y),
-                ]
-                
-                # Create triangle face
-                # Create wire from points using Wire.makePolygon (closed polygon)
-                # Convert points to Vector objects and close the polygon
-                triangle_vectors = [Vector(p[0], p[1], 0) for p in triangle_points]
-                # Close the polygon by adding the first point at the end
-                triangle_vectors_closed = triangle_vectors + [triangle_vectors[0]]
-                triangle_wire = Wire.makePolygon(triangle_vectors_closed)
-                triangle_face = face(triangle_wire)
-                triangle_face_rotated = rotate_around_center(triangle_face)
-                ridge_faces.append(triangle_face_rotated)
-    
     # Combine all faces using fuse
-    faces_to_fuse = [outer_ring, center_oval, top_connector, bottom_connector] + ridge_faces
-    result = clean(fuse(*faces_to_fuse))
+    result = clean(fuse(outer_ring, center_oval, top_connector, bottom_connector))
     
     # If orient_to_path is provided, orient the result to the path
     if orient_to_path is not None:

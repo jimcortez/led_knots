@@ -96,18 +96,18 @@ def config_settings_hash(config) -> str:
         'rect_inner_x': _round_for_hash(ts.rect_inner_x),
         'rect_inner_y': _round_for_hash(ts.rect_inner_y),
     }
-    if ts.diffusion_ridges is not None:
-        out['tube_settings']['diffusion_ridges'] = {
-            k: _round_for_hash(v) for k, v in sorted(ts.diffusion_ridges.items())
-        }
-    else:
-        out['tube_settings']['diffusion_ridges'] = None
     if ts.inner_tube_diameter is not None:
         out['tube_settings']['inner_tube_diameter'] = _round_for_hash(ts.inner_tube_diameter)
     if ts.inner_tube_wall_thickness is not None:
         out['tube_settings']['inner_tube_wall_thickness'] = _round_for_hash(ts.inner_tube_wall_thickness)
-    if ts.face_type == 'solid_circle_pyramid':
-        out['tube_settings']['_pyramid_sampling_version'] = 1
+    if ts.pyramid_studded is not None:
+        out['tube_settings']['pyramid_studded'] = {
+            str(k): v for k, v in sorted(ts.pyramid_studded.items())
+        }
+    if ts.braided_rope is not None:
+        out['tube_settings']['braided_rope'] = {
+            str(k): v for k, v in sorted(ts.braided_rope.items())
+        }
 
     ps = config.path_settings
     out['path_settings'] = {
