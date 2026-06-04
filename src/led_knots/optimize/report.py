@@ -17,6 +17,7 @@ from typing import Any, List, Optional, Tuple
 import numpy as np
 
 from .analysis import CavityResult, IslandResult, OverhangResult
+from .face_tagging import FaceTagResult
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 COLOR_DEFAULT = (180, 180, 180, 255)
 COLOR_OVERHANG = (255, 60, 60, 255)
 COLOR_ISLAND_EXTRA = (255, 200, 0, 255)
+COLOR_CONNECTOR = (60, 200, 100, 255)
 
 
 @dataclass(frozen=True)
@@ -36,6 +38,10 @@ class OrientationCandidate:
     build orientation (i.e. ``rotated_vertices = vertices @ matrix.T``).
     ``axis`` and ``angle_deg`` are the equivalent axis-angle representation
     suitable for CadQuery's ``rotate((0,0,0), axis, angle_deg)``.
+
+    ``connector_bonus`` is in ``[0, 1]`` — area-weighted fraction of
+    tagged connector faces that become vertical after the rotation. 0 if
+    face tagging didn't run or no connectors were found.
     """
 
     rank: int
@@ -46,6 +52,7 @@ class OrientationCandidate:
     bottom_area_mm2: float
     overhang_area_mm2: float
     contour_length_mm: float
+    connector_bonus: float = 0.0
 
 
 @dataclass
@@ -57,6 +64,7 @@ class OptimizationReport:
     overhangs: Optional[OverhangResult] = None
     islands: Optional[IslandResult] = None
     cavities: Optional[CavityResult] = None
+    connector_tags: Optional[FaceTagResult] = None
     # Tessellated mesh used by the analyzers (in the orientation the part
     # will be exported in). Stashed so callers can render annotated PNGs
     # without re-tessellating. Not part of the printed report.
@@ -114,11 +122,17 @@ def format_console(report: OptimizationReport, *, part_name: str = "part") -> st
                 )
     for cand in report.orientation_candidates:
         marker = " *" if (report.applied_candidate is not None and cand.rank == report.applied_candidate.rank) else "  "
+        bonus_str = (
+            f"  conn={cand.connector_bonus:.2f}"
+            if cand.connector_bonus > 0.0
+            else ""
+        )
         lines.append(
             f"[optimize] {marker}rank={cand.rank} "
             f"unprintability={cand.unprintability:8.3f}  "
             f"bottom={cand.bottom_area_mm2:7.1f} mm²  "
-            f"overhang={cand.overhang_area_mm2:7.1f} mm²  "
+            f"overhang={cand.overhang_area_mm2:7.1f} mm²"
+            f"{bonus_str}  "
             f"{_axis_angle_str(cand.axis, cand.angle_deg)}"
         )
     if report.applied_candidate is None and report.orientation_candidates:
@@ -138,13 +152,18 @@ def format_console(report: OptimizationReport, *, part_name: str = "part") -> st
 def build_face_color_array(
     n_faces: int,
     overhangs: Optional[OverhangResult] = None,
+    connector_tags: Optional[FaceTagResult] = None,
 ) -> np.ndarray:
     """Compose a (F, 4) uint8 RGBA face-color array from analyzer results.
 
-    Default color goes to every face; overhang faces are overlaid with the
-    overhang color. Future analyzers (islands, cavity faces) layer in here.
+    Default color goes to every face. Connector faces are painted green
+    first; overhang faces overlay red on top, so an overhanging connector
+    shows as red (the higher-priority finding) — they need supports
+    regardless of structural role.
     """
     colors = np.tile(np.asarray(COLOR_DEFAULT, dtype=np.uint8), (n_faces, 1))
+    if connector_tags is not None and connector_tags.connector_mask.shape[0] == n_faces:
+        colors[connector_tags.connector_mask] = np.asarray(COLOR_CONNECTOR, dtype=np.uint8)
     if overhangs is not None and overhangs.face_mask.shape[0] == n_faces:
         colors[overhangs.face_mask] = np.asarray(COLOR_OVERHANG, dtype=np.uint8)
     return colors
@@ -173,10 +192,14 @@ def write_annotated_pngs(
     out_dir.mkdir(parents=True, exist_ok=True)
     written: List[Path] = []
 
-    if report.overhangs is None:
+    if report.overhangs is None and report.connector_tags is None:
         return written
 
-    face_colors = build_face_color_array(len(mesh.faces), overhangs=report.overhangs)
+    face_colors = build_face_color_array(
+        len(mesh.faces),
+        overhangs=report.overhangs,
+        connector_tags=report.connector_tags,
+    )
     base_elevation = float(getattr(preview_settings, "elevation", 30.0))
 
     for label, elevation in (

@@ -24,6 +24,16 @@ class OrientationSettings:
         self.top_n_candidates: int = int(data.get("top_n_candidates", 5))
         if self.top_n_candidates < 1:
             raise ValueError("print_optimization.orientation.top_n_candidates must be >= 1")
+        # Multiplicative shave on Tweaker-3 unprintability when an
+        # orientation makes the LED-tube connectors stand vertically
+        # (so they act as natural support columns). 0 disables.
+        self.connector_bonus_weight: float = float(
+            data.get("connector_bonus_weight", 0.7)
+        )
+        if not (0.0 <= self.connector_bonus_weight < 1.0):
+            raise ValueError(
+                "print_optimization.orientation.connector_bonus_weight must be in [0, 1)"
+            )
 
 
 class PrintOptimizationSettings:
@@ -59,5 +69,8 @@ class PrintOptimizationSettings:
                 "enabled": bool(self.orientation.enabled),
                 "auto_apply": bool(self.orientation.auto_apply),
                 "top_n_candidates": int(self.orientation.top_n_candidates),
+                "connector_bonus_weight": float(
+                    self.orientation.connector_bonus_weight
+                ),
             },
         }

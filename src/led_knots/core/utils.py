@@ -438,7 +438,11 @@ def draw_part(path, config, aux=None, **face_kwargs):
         else:
             from led_knots.optimize import optimize_part, format_console
             result, report = optimize_part(
-                result, config.print_optimization, name=config.name or "part"
+                result,
+                config.print_optimization,
+                name=config.name or "part",
+                path=path,
+                tube_settings=config.tube_settings,
             )
             print(format_console(report, part_name=config.name or "part"))
             report_dir = getattr(config, "optimize_report_dir", None)

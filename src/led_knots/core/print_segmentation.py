@@ -315,6 +315,11 @@ def build_segmented_tube_assembly(
                     part_shape,
                     matrices,
                     overhang_threshold_deg=overhang_threshold,
+                    path=wire_seg,
+                    tube_settings=config.tube_settings,
+                    connector_bonus_weight=float(
+                        po.orientation.connector_bonus_weight
+                    ),
                 )
                 chosen = eulers[win_idx]
                 if chosen != plan.euler_xyz_deg:

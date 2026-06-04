@@ -11,16 +11,24 @@ islands, cavities) land in follow-up commits.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import tempfile
 from pathlib import Path
 from typing import Tuple, Union
 
 import cadquery as cq
+import numpy as np
 import trimesh
 
 from .analysis import detect_islands, detect_overhangs, detect_trapped_cavities
-from .orient import best_rotation_by_overhang, find_best_orientations
+from .face_tagging import FaceTagResult, tag_connector_faces
+from .orient import (
+    best_rotation_by_overhang,
+    connector_verticality_bonus,
+    find_best_orientations,
+    rescore_candidates_with_connector_bonus,
+)
 from .report import OptimizationReport, OrientationCandidate, format_console
 from .settings import PrintOptimizationSettings
 
@@ -105,24 +113,64 @@ def best_orientation_index(
     rotation_matrices,
     *,
     overhang_threshold_deg: float = 35.0,
+    path=None,
+    tube_settings=None,
+    connector_bonus_weight: float = 0.0,
 ) -> int:
     """
-    Pick the rotation that minimises overhang area when applied to ``part``.
+    Pick the rotation that minimises SLA support need when applied to ``part``.
 
-    Tessellates ``part`` once, then evaluates each rotation matrix by
-    transforming the world-down vector instead of the mesh — O(F) per
-    candidate, not O(F) vertex transforms.
+    Base score is overhang area (lower = better). When ``path`` and
+    ``tube_settings`` are supplied and ``connector_bonus_weight > 0``,
+    faces are tagged for connector-flank role and the score is shaved by
+    ``(1 - weight * connector_verticality)`` — same multiplicative form
+    as ``rescore_candidates_with_connector_bonus`` so scores remain
+    comparable across the two code paths.
 
     Returns the winning index into ``rotation_matrices`` (0 if the list is
-    empty, since there's nothing better to do).
+    empty).
     """
     if not rotation_matrices:
         return 0
     mesh = _to_trimesh(part)
-    idx, _ = best_rotation_by_overhang(
-        mesh, rotation_matrices, overhang_threshold_deg=overhang_threshold_deg
-    )
-    return idx
+
+    connector_mask = None
+    if (
+        path is not None
+        and tube_settings is not None
+        and connector_bonus_weight > 0.0
+    ):
+        try:
+            tags = tag_connector_faces(mesh, path, tube_settings)
+            if tags.n_connector_faces > 0:
+                connector_mask = tags.connector_mask
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("best_orientation_index: face tagging failed (%r)", exc)
+
+    if connector_mask is None:
+        idx, _ = best_rotation_by_overhang(
+            mesh, rotation_matrices, overhang_threshold_deg=overhang_threshold_deg
+        )
+        return idx
+
+    # Combined score: overhang area * (1 - w * connector_verticality)
+    from .orient import score_orientation_overhang
+
+    normals = np.asarray(mesh.face_normals, dtype=np.float64)
+    areas = np.asarray(mesh.area_faces, dtype=np.float64)
+    weight = float(connector_bonus_weight)
+    best_idx = 0
+    best_score = math.inf
+    for i, mat in enumerate(rotation_matrices):
+        overhang = score_orientation_overhang(
+            normals, areas, mat, overhang_threshold_deg=overhang_threshold_deg
+        )
+        bonus = connector_verticality_bonus(normals, areas, connector_mask, mat)
+        adjusted = overhang * (1.0 - weight * bonus)
+        if adjusted < best_score:
+            best_score = adjusted
+            best_idx = i
+    return best_idx
 
 
 def optimize_part(
@@ -130,6 +178,8 @@ def optimize_part(
     opt_settings: PrintOptimizationSettings,
     *,
     name: str = "part",
+    path=None,
+    tube_settings=None,
 ) -> Tuple[_PartT, OptimizationReport]:
     """
     Analyze a built part for SLA-print problems and (optionally) re-orient it.
@@ -164,6 +214,32 @@ def optimize_part(
         top_n=opt_settings.orientation.top_n_candidates,
         min_volume=True,
     )
+
+    # Connector-aware rescoring (PR4). Skipped when path/tube_settings
+    # aren't supplied (e.g. non-knot callers) or when the face type has
+    # no connectors. The bonus shaves Tweaker-3's volume-minimising score
+    # so orientations that stand the connector strips vertically (acting
+    # as natural support columns) are preferred.
+    connector_tags = None
+    if (
+        path is not None
+        and tube_settings is not None
+        and opt_settings.orientation.connector_bonus_weight > 0.0
+    ):
+        try:
+            connector_tags = tag_connector_faces(mesh, path, tube_settings)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("optimize_part: face tagging failed (%r)", exc)
+            connector_tags = None
+        if connector_tags is not None and connector_tags.n_connector_faces > 0:
+            candidates = rescore_candidates_with_connector_bonus(
+                candidates,
+                mesh,
+                connector_tags.connector_mask,
+                bonus_weight=opt_settings.orientation.connector_bonus_weight,
+            )
+        report.connector_tags = connector_tags
+
     report.orientation_candidates = candidates
 
     if not candidates:
@@ -179,12 +255,17 @@ def optimize_part(
             logger.warning("optimize_part: rotation apply failed (%r); skipping.", exc)
             report.note = f"rotation apply failed: {exc!r}"
 
-    # Re-tessellate after any rotation so analyzers report findings on
-    # the final orientation that will be exported.
-    try:
-        analysis_mesh = _to_trimesh(part) if opt_settings.orientation.auto_apply else mesh
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("optimize_part: post-rotate tessellation failed (%r)", exc)
+    # Use the same trimesh for the analyzers as for tagging so face
+    # indices stay valid. When the orientation was applied, rotate the
+    # mesh's vertices in-place (preserves face indices, unlike
+    # re-tessellating from the rotated CadQuery part).
+    if opt_settings.orientation.auto_apply and report.applied_candidate is not None:
+        rotated_mesh = mesh.copy()
+        T = np.eye(4)
+        T[:3, :3] = report.applied_candidate.matrix
+        rotated_mesh.apply_transform(T)
+        analysis_mesh = rotated_mesh
+    else:
         analysis_mesh = mesh
 
     try:

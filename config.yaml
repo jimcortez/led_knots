@@ -163,6 +163,12 @@ print_optimization:
     enabled: true
     auto_apply: false          # require --auto-orient to mutate geometry
     top_n_candidates: 5
+    # Multiplicative bonus when a candidate orientation stands the LED-tube
+    # connectors vertically (so they act as natural support columns).
+    # 0 disables; 0.7 means a fully-vertical-connectors orientation cuts
+    # Tweaker-3's unprintability score by 70%, usually enough to flip the
+    # default volume-minimising pick to the connectors-as-supports pose.
+    connector_bonus_weight: 0.7
 
 # -----------------------------------------------------------------------------
 # Server (cadquery-web-viewer)

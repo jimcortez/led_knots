@@ -84,6 +84,85 @@ def best_rotation_by_overhang(
     return best_idx, best_score
 
 
+def connector_verticality_bonus(
+    face_normals: np.ndarray,
+    face_areas: np.ndarray,
+    connector_mask: np.ndarray,
+    rotation_matrix: np.ndarray,
+) -> float:
+    """Area-weighted fraction of connector faces that become vertical after rotation.
+
+    A connector "flank" face stands vertically (lining up with the build
+    axis, so the strip acts as a natural support column) when its rotated
+    normal lies in the horizontal plane — i.e. ``|n'_z|`` is small.
+
+    Returns a value in ``[0, 1]``: 1 means every tagged connector face is
+    perfectly vertical post-rotation; 0 means every one is horizontal
+    (lying flat). 0 if no faces are tagged.
+    """
+    if connector_mask is None or not connector_mask.any():
+        return 0.0
+    # Pull rotation through to local frame: world-Z in the un-rotated
+    # mesh frame is `R.T @ [0,0,1]`, which is the last column of R.T,
+    # i.e. the last *row* of R.
+    z_local = rotation_matrix[2, :]
+    n = face_normals[connector_mask]
+    a = face_areas[connector_mask]
+    vert_per_face = 1.0 - np.abs(n @ z_local)  # 1 = vertical flank, 0 = horizontal
+    total = float(a.sum())
+    if total <= 0:
+        return 0.0
+    return float((vert_per_face * a).sum() / total)
+
+
+def rescore_candidates_with_connector_bonus(
+    candidates: List[OrientationCandidate],
+    mesh: trimesh.Trimesh,
+    connector_mask: np.ndarray,
+    *,
+    bonus_weight: float,
+) -> List[OrientationCandidate]:
+    """Re-rank Tweaker-3 candidates by ``unprintability * (1 - w * bonus)``.
+
+    The bonus is the area-weighted connector verticality (0..1). With
+    ``bonus_weight=0.7`` a fully-vertical-connectors orientation cuts the
+    effective unprintability by 70%, which is usually enough to flip
+    Tweaker's volume-minimising default to the orientation that uses the
+    connectors as natural supports.
+
+    Returns a new list, sorted by the rescored value ascending. ``rank``
+    is renumbered to match the new ordering; other fields are preserved.
+    """
+    if not candidates or connector_mask is None or not connector_mask.any():
+        return candidates
+
+    normals = np.asarray(mesh.face_normals, dtype=np.float64)
+    areas = np.asarray(mesh.area_faces, dtype=np.float64)
+    weight = float(bonus_weight)
+
+    scored: List[Tuple[float, float, OrientationCandidate]] = []
+    for cand in candidates:
+        bonus = connector_verticality_bonus(normals, areas, connector_mask, cand.matrix)
+        adjusted = cand.unprintability * (1.0 - weight * bonus)
+        scored.append((adjusted, bonus, cand))
+    scored.sort(key=lambda x: x[0])
+
+    return [
+        OrientationCandidate(
+            rank=i + 1,
+            matrix=cand.matrix,
+            axis=cand.axis,
+            angle_deg=cand.angle_deg,
+            unprintability=cand.unprintability,
+            bottom_area_mm2=cand.bottom_area_mm2,
+            overhang_area_mm2=cand.overhang_area_mm2,
+            contour_length_mm=cand.contour_length_mm,
+            connector_bonus=bonus,
+        )
+        for i, (_, bonus, cand) in enumerate(scored)
+    ]
+
+
 def _axis_angle_from_matrix(matrix: np.ndarray) -> tuple:
     """
     Decompose a 3x3 rotation matrix into (axis, angle_rad).
