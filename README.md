@@ -17,6 +17,7 @@ LED Knots creates parametric 3D models of various mathematical knots and paths, 
 - **Flexible orientation control**: Advanced path curvature analysis and twist optimization
 - **Multiple export formats**: STL, STEP, 3MF, GLB/GLTF support
 - **Web-based preview**: Optional [cadquery-web-viewer](https://pypi.org/project/cadquery-web-viewer/) integration (embedded Flask thread or HTTP to a long-running server)
+- **SLA / resin print optimization**: Detects overhangs, islands, and trapped cavities; auto-rotates parts so the LED-tube radial connectors act as natural support columns. Per-segment rescoring when `max_print_bounds` is enabled. See `print_optimization` in `config.yaml` and the `--optimize` / `--auto-orient` / `--optimize-report-dir` flags.
 
 ## Installation
 
@@ -85,6 +86,9 @@ All knot commands accept the same options:
 | `--output-mesh FILEPATH` | Export a simulation-focused mesh using trimesh. Currently only `.obj` is supported and is tuned for physics engines like Genesis (meters, watertightness, optional decimation). |
 | `--server` | Enable browser preview using `server.viewer` from `config.yaml` (legacy alias; prefer `--viewer`) |
 | `--viewer MODE` | `off`, `embedded`, `embedded-block`, or `remote` (overrides `server.viewer.mode` when set) |
+| `--optimize` / `--no-optimize` | Run the SLA print-optimization stage; reports overhang clusters, islands, and connector tagging on the built mesh. |
+| `--auto-orient` | Apply the top-ranked SLA orientation to the exported geometry (implies `--optimize`). For LED-tube knots, the score is biased toward orientations that stand the radial connector strips vertically so they act as natural support columns. |
+| `--optimize-report-dir DIR` | Write annotated PNG diagnostics for the optimizer (top + bottom views, with overhangs in red and connectors in green) to DIR. Implies `--optimize`. |
 | `-v`, `--verbose` | Enable debug-level logging |
 
 When you omit `--export` and any viewer flag (`--server` / `--viewer` not enabling preview), the knot still builds geometry headlessly. Use `--server` or `--viewer …` to send the model to **cadquery-web-viewer** (remote server or embedded).
