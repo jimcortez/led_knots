@@ -1174,6 +1174,7 @@ dependencies = [
     { name = "pyrender" },
     { name = "pyyaml" },
     { name = "rtree" },
+    { name = "tqdm" },
     { name = "trimesh" },
 ]
 
@@ -1211,6 +1212,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rtree", specifier = ">=1.4.1" },
+    { name = "tqdm", specifier = ">=4.67.0" },
     { name = "trimesh", specifier = ">=4.0.0" },
 ]
 provides-extras = ["dev"]

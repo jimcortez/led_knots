@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 import cadquery as cq
+from tqdm.auto import tqdm
 from .print_segmentation import build_segmented_tube_assembly
 
 logger = logging.getLogger(__name__)
@@ -303,8 +304,23 @@ def draw_part(path, config, aux=None, **face_kwargs):
                     part_name=slugify(config.name or "knot"),
                     preview_settings=config.rendering.first_preview_job(),
                 )
-                for p in written:
-                    logger.info("[optimize] annotated PNG: %s", p)
+                if written:
+                    if sys.stderr.isatty():
+                        for _ in tqdm(
+                            written,
+                            total=len(written),
+                            desc="Writing annotated PNGs",
+                            unit="png",
+                        ):
+                            pass
+                    else:
+                        for p in written:
+                            logger.info("[optimize] annotated PNG: %s", p)
+                    logger.info(
+                        "[optimize] wrote %d annotated PNG(s) to %s",
+                        len(written),
+                        report_dir,
+                    )
 
     render_part(
         result,

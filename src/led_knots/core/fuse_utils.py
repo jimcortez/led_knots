@@ -11,10 +11,12 @@ disconnected lumps.
 from __future__ import annotations
 
 import logging
+import sys
 from typing import Union
 
 import cadquery as cq
 from cadquery.func import clean, fuse
+from tqdm.auto import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +58,14 @@ def fuse_part_solids(part: _PartT, *, name: str = "part") -> _PartT:
 
     logger.info("Fusing %d solids into one body for %s...", n, name)
     merged = solids[0]
-    for idx, body in enumerate(solids[1:], start=2):
-        if idx == 2 or idx % 25 == 0 or idx == n:
-            logger.info("Fusing solid %d/%d for %s...", idx, n, name)
+    bar = tqdm(
+        solids[1:],
+        total=n - 1,
+        desc=f"Fusing solids for {name}",
+        unit="solid",
+        disable=not sys.stderr.isatty(),
+    )
+    for body in bar:
         merged = fuse(merged, body)
     merged = clean(merged)
 

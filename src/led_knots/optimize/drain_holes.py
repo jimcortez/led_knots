@@ -17,10 +17,12 @@ how the print actually orients on the plate.
 from __future__ import annotations
 
 import logging
+import sys
 from typing import List, Tuple, Union
 
 import cadquery as cq
 import numpy as np
+from tqdm.auto import tqdm
 
 from .analysis import Cavity
 from .settings import DrainHoleSettings
@@ -72,7 +74,14 @@ def drill_drain_holes(
 
     drilled: List[Cavity] = []
     out_solid = solid
-    for cav in trapped:
+    bar = tqdm(
+        trapped,
+        total=len(trapped),
+        desc="Drilling drain holes",
+        unit="cavity",
+        disable=not sys.stderr.isatty(),
+    )
+    for cav in bar:
         cx, cy, _ = cav.centroid
         # Build a Z-aligned cylinder centered at (cx, cy, z_center) using
         # CadQuery's high-level API. cq.Solid.makeCylinder builds along

@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import math
 import signal
+import sys
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -22,6 +23,7 @@ from typing import Any, Dict, List, Optional
 import cadquery as cq
 from cadquery import Vector, Wire, Plane, Edge
 from cadquery.occ_impl.shapes import Compound, Solid
+from tqdm.auto import tqdm
 
 from ..path_frames import PathFrame, frame_at_arc_length, sample_path_frames
 from .swept_face import SweptFaceModel
@@ -394,6 +396,12 @@ class BraidedRopeModel:
         total_strands = 2 * params.num_strands_per_dir
         strands: List[Solid] = []
         method_counts = {"loft": 0, "loft-ruled": 0, "sweep": 0, "failed": 0}
+        bar = tqdm(
+            total=total_strands,
+            desc="Building braid strands",
+            unit="strand",
+            disable=not sys.stderr.isatty(),
+        )
         for direction in (-1, 1):
             for i in range(params.num_strands_per_dir):
                 phase = i * (2.0 * math.pi / params.num_strands_per_dir)
@@ -405,6 +413,8 @@ class BraidedRopeModel:
                 method_counts[method] = method_counts.get(method, 0) + 1
                 if strand is not None:
                     strands.append(strand)
+                bar.update(1)
+        bar.close()
 
         logger.info(
             "BraidedRopeModel: built %d/%d strands (loft=%d, loft-ruled=%d, sweep=%d, failed=%d)",

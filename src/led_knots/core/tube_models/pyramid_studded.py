@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import logging
 import math
+import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 import cadquery as cq
 from cadquery import Vector
 from cadquery.occ_impl.shapes import Compound, Face, Shell, Solid, Wire
+from tqdm.auto import tqdm
 
 from ..path_frames import PathFrame, frame_at_arc_length, sample_path_frames
 from .swept_face import SweptFaceModel
@@ -194,6 +196,12 @@ class PyramidStuddedModel:
 
         d_theta = 2.0 * math.pi / circ_count
         pyramids: List[Solid] = []
+        bar = tqdm(
+            total=len(row_positions) * circ_count,
+            desc="Building pyramids",
+            unit="pyramid",
+            disable=not sys.stderr.isatty(),
+        )
         for row_idx, s in enumerate(row_positions):
             frame = frame_at_arc_length(frames, s)
             phase = 0.5 * d_theta if (stagger and row_idx % 2 == 1) else 0.0
@@ -209,6 +217,8 @@ class PyramidStuddedModel:
                         embed_depth=embed_depth,
                     )
                 )
+                bar.update(1)
+        bar.close()
 
         logger.info(
             "pyramid_studded: %d rows × %d per row = %d pyramids on a %.1f mm path",

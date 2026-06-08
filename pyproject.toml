@@ -27,6 +27,7 @@ dependencies = [
     "pyknotid",
     "pyrender>=0.1.45",
     "pyyaml>=6.0",
+    "tqdm>=4.67.0",
     "trimesh>=4.0.0",
     "cadquery-web-viewer>=2.0.0",
     "manifold3d>=3.5.1",
