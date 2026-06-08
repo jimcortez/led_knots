@@ -224,20 +224,20 @@ Configuration is a layered YAML + CLI structure exposed through
 
 1. Loads `config.yaml` from the repo root.
 2. Deep-merges `config.local.yaml` on top, if present.
-3. Resolves the active `face_type` and its `face_settings.<face_type>` block via
+3. Parses CLI args early; if `--config FILE` is set, deep-merges that overlay
+   on top (relative paths resolve against the repo root).
+4. Resolves the active `face_type` and its `face_settings.<face_type>` block via
    [`resolve_face_settings`](../src/led_knots/core/config.py#L46), which walks
    the optional `inherit_from` chain and deep-merges parent keys with child
    keys — so a `face_settings.led_circle_v2` block can `inherit_from:
    led_circle` and only override the deltas. Cycles and missing parents are
    detected and raised.
-4. Builds a `TubeSettings(face_type, resolved_face_data)` convenience object
+5. Builds a `TubeSettings(face_type, resolved_face_data)` convenience object
    that knot modules use as `config.tube_settings.<key>` without having to know
    which face type they were called with.
-5. Parses `argparse` flags via
-   [`parse_args`](../src/led_knots/core/utils.py#L32) and lets CLI options
-   override matching config keys (e.g. `--export`, `--preview`, `--viewer`,
+6. Applies per-flag CLI overrides (e.g. `--export`, `--preview`, `--viewer`,
    `--optimize / --no-optimize`, `--auto-orient`,
-   `--optimize-report-dir`, `--export-parts`).
+   `--optimize-report-dir`, `--export-parts`) on top of the merged YAML.
 
 The returned `Config` exposes substructures used throughout the pipeline:
 `output_bounds`, `tube_settings`, `path_settings`, `max_print_bounds`,

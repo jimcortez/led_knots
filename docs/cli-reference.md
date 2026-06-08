@@ -1,10 +1,11 @@
 # CLI reference
 
 Every knot in `led_knots` is its own runnable script. There is no single top-level
-binary, no subcommands, and no global config flag — each knot module owns its own
-`argparse` parser, instantiated by a shared helper in
+binary or subcommands — each knot module owns its own `argparse` parser,
+instantiated by a shared helper in
 [src/led_knots/core/utils.py](../src/led_knots/core/utils.py). All knot scripts
-therefore accept the same set of flags, documented below.
+therefore accept the same set of flags, documented below (including the shared
+`--config` overlay flag).
 
 ## Console scripts
 
@@ -70,6 +71,25 @@ Behaviorally there is no difference.
 All flags are parsed by `parse_args()` in
 [core/utils.py:32](../src/led_knots/core/utils.py#L32). The flag set is the
 same for every knot script.
+
+### `--config FILE`
+
+- **Type:** path string.
+- **Default:** `None`.
+- **Effect:** Loads a YAML overlay and deep-merges it on top of `config.yaml`
+  and `config.local.yaml`. Only keys present in the overlay file are changed;
+  nested dicts are merged key-by-key. Relative paths resolve against the
+  repository root (same anchor as `config.yaml`), so `configs/foo.yaml` works
+  regardless of the current working directory.
+- **Precedence:** Wins over both YAML files; individual flags such as
+  `--optimize` still override matching keys afterward.
+- **Errors:** Raises `FileNotFoundError` if the overlay path does not exist.
+
+```bash
+led-knots-trefoil --config configs/permutations/braided-tight.yaml --export out/trefoil.stl
+```
+
+See [Configuration](configuration.md) for layering rules and worked examples.
 
 ### `--export FILEPATH`
 

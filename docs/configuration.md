@@ -8,12 +8,13 @@ every key, and every constraint enforced when the config is parsed.
 
 ## Files and overrides
 
-Two files at the repository root drive configuration:
+Two files at the repository root drive configuration, plus an optional CLI overlay:
 
-| File | Purpose | Tracked in git |
+| File / source | Purpose | Tracked in git |
 | --- | --- | --- |
 | [config.yaml](../config.yaml) | Committed defaults. The source of truth for what every key means and what its default value is. | Yes |
 | [config.local.yaml](../config.local.yaml) | Personal/local overrides. Set only the keys you want to change; the rest are inherited from `config.yaml`. | No (in [.gitignore](../.gitignore)) |
+| `--config FILE` | Named overlay selected at runtime (e.g. `configs/permutations/trefoil-tight.yaml`). Deep-merged on top of both YAML files. Relative paths resolve against the repo root. | Yes (when stored under `configs/`) |
 
 `get_config()` in [src/led_knots/core/config.py](../src/led_knots/core/config.py)
 is the single entry point. Every knot script, every CLI, and the notebook all
@@ -44,14 +45,17 @@ Defined by [`Config.__init__`](../src/led_knots/core/config.py#L491) and
       defaults to 100 mm if `output_bounds` is omitted).
    2. Values in `config.yaml`.
    3. Values in `config.local.yaml` (if the file exists).
-   4. CLI arguments (only a small subset, see below).
+   4. Values in the `--config FILE` overlay (if the flag is passed).
+   5. CLI arguments (only a small subset, see below).
 2. **Deep merge.** Dictionaries are merged recursively. If a key exists in
    both files and both values are dicts, the dicts are merged key-by-key. If a
    value is a scalar, list, or one is non-dict, the override replaces the base
    wholesale. Lists are **not** appended — they are replaced.
 3. **Missing files.** `config.yaml` is mandatory; if it is missing,
    `open()` raises `FileNotFoundError`. `config.local.yaml` is optional —
-   absence is silently ignored. An empty YAML file is treated as `{}`.
+   absence is silently ignored. When `--config FILE` is passed, the overlay
+   file must exist or the loader raises `FileNotFoundError`. An empty YAML
+   file is treated as `{}`.
 4. **Invalid YAML.** `yaml.safe_load` raises `yaml.YAMLError`. The loader
    does not catch it; the script crashes with the parser's line/column.
 5. **Validation.** Each settings class validates eagerly in its constructor
@@ -632,7 +636,27 @@ ergonomic access:
 
 ## Worked examples
 
-### 1. Make every model larger
+### 1. Select a tracked config permutation
+
+Store named variants under `configs/` (or any path you prefer) and pass them
+at runtime. Only specify keys you want to change — the rest come from
+`config.yaml` and `config.local.yaml`.
+
+```yaml
+# configs/permutations/braided-tight.yaml
+face_type: braided_rope_tube
+face_settings:
+  braided_rope_tube:
+    braided_rope:
+      pack_factor: 0.85
+      num_strands_per_dir: 30
+```
+
+```bash
+led-knots-trefoil --config configs/permutations/braided-tight.yaml --export out/trefoil-tight.stl
+```
+
+### 2. Make every model larger
 
 Bump the bounding box without touching anything else.
 
@@ -644,7 +668,7 @@ output_bounds:
   height: 300
 ```
 
-### 2. Switch to braided_rope cross-section
+### 3. Switch to braided_rope cross-section
 
 The committed [config.local.yaml](../config.local.yaml) already does this;
 the snippet below is a minimal variant. The `inherit_from: solid_circle`
@@ -667,7 +691,7 @@ face_settings:
       strand_end_offset: 1.0
 ```
 
-### 3. Enable print optimization with auto-orient and drain holes
+### 4. Enable print optimization with auto-orient and drain holes
 
 Turn the whole pipeline on, let it rotate the model, and drill drain/vent
 holes through any cavity larger than 100 mm³. You will still typically pass

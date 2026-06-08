@@ -45,6 +45,16 @@ def parse_args(description: str = "Create and render a knot model"):
     """
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
+        '--config',
+        type=str,
+        metavar='FILE',
+        default=None,
+        help=(
+            'YAML config overlay merged on top of config.yaml and config.local.yaml. '
+            'Only specify keys you want to override.'
+        ),
+    )
+    parser.add_argument(
         '--export',
         type=str,
         metavar='FILEPATH',

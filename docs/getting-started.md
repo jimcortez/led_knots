@@ -137,7 +137,7 @@ The image dimensions, camera, lighting, and colors are controlled by the `previe
 
 ## Tune dimensions
 
-Project-wide defaults live in [config.yaml](../config.yaml). To customise without touching the tracked file, create a `config.local.yaml` in the repo root — its keys are deep-merged on top of the defaults at load time.
+Project-wide defaults live in [config.yaml](../config.yaml). To customise without touching the tracked file, create a `config.local.yaml` in the repo root — its keys are deep-merged on top of the defaults at load time. To switch between named, git-tracked variants, pass `--config FILE` (e.g. `--config configs/permutations/trefoil-tight.yaml`); the overlay wins over both YAML files.
 
 A minimal override that resizes the build envelope and the tube outer diameter:
 

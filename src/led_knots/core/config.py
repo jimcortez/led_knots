@@ -1,7 +1,8 @@
 """
 Configuration management for LED knots.
 
-Reads configuration from config.yaml and optionally overrides with config.local.yaml.
+Reads configuration from config.yaml, optionally overrides with config.local.yaml,
+and supports a --config CLI overlay merged on top of both.
 Provides an object-oriented interface to configuration values.
 """
 
@@ -14,6 +15,13 @@ from .utils import parse_args
 from led_knots.optimize.settings import PrintOptimizationSettings
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_config_path(project_root: Path, path_str: str) -> Path:
+    """Resolve a --config path: absolute as-is, relative against project root."""
+    p = Path(path_str)
+    return p if p.is_absolute() else project_root / p
+
 
 # Face types allowed for top-level face_type and in face_settings keys.
 VALID_FACE_TYPES = (
@@ -507,6 +515,19 @@ class Config:
                 local_data = yaml.safe_load(f) or {}
                 # Merge local overrides into base config
                 config_data = self._merge_dicts(config_data, local_data)
+
+        # Parse command line arguments (overlay must merge before settings init)
+        args = parse_args(description=description or "Create and render a knot model")
+
+        self.config_overlay_path: Optional[Path] = None
+        if args.config:
+            overlay_path = _resolve_config_path(project_root, args.config)
+            if not overlay_path.exists():
+                raise FileNotFoundError(f"Config overlay not found: {overlay_path}")
+            with open(overlay_path, 'r') as f:
+                overlay_data = yaml.safe_load(f) or {}
+            config_data = self._merge_dicts(config_data, overlay_data)
+            self.config_overlay_path = overlay_path
         
         # Initialize configuration sections
         self.output_bounds = OutputBounds(config_data.get('output_bounds', {}))
@@ -523,9 +544,6 @@ class Config:
         self.print_optimization = PrintOptimizationSettings(
             config_data.get("print_optimization", {})
         )
-        
-        # Parse command line arguments
-        args = parse_args(description=description or "Create and render a knot model")
         
         # Server settings (viewer + optional CADQUERY_WEB_VIEWER_* styling)
         server_data = config_data.get('server', {})
