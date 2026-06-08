@@ -18,6 +18,18 @@ def test_fuse_overlapping_solids_into_one_body() -> None:
     assert len(fused.Solids()) == 1
 
 
+def test_fuse_many_overlapping_solids_into_one_body() -> None:
+    solids = [
+        cq.Workplane("XY").move(i, 0).box(2, 2, 2).val()
+        for i in range(5)
+    ]
+    compound = Compound.makeCompound(solids)
+
+    fused = fuse_part_solids(compound, name="many")
+
+    assert len(fused.Solids()) == 1
+
+
 def test_fuse_single_solid_is_noop() -> None:
     box = cq.Workplane("XY").box(1, 1, 1).val()
     assert fuse_part_solids(box, name="single") is box
