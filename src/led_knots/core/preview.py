@@ -4,12 +4,24 @@ Render GLB meshes to preview images using trimesh, pyrender, and Pillow.
 
 import logging
 import math
+import os
 from pathlib import Path
 from typing import Any, List, Union
 
 import numpy as np
 import trimesh
 from PIL import Image
+
+
+def _configure_headless_opengl() -> None:
+    """Use EGL offscreen rendering when no X display is available."""
+    if os.environ.get("PYOPENGL_PLATFORM"):
+        return
+    if not os.environ.get("DISPLAY"):
+        os.environ["PYOPENGL_PLATFORM"] = "egl"
+
+
+_configure_headless_opengl()
 import pyrender
 
 logger = logging.getLogger(__name__)

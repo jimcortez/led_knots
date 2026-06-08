@@ -6,14 +6,14 @@ designed to house LED strips. Built using the CadQuery CAD engine.
 
 Subpackages:
     core: Core utilities for path analysis, rendering, and LED circle cross-sections
-    knots: Individual knot generator modules
+    knots: Knot path builders (discovered by filename via knot_type in config)
+    parts: Accessory part builders (discovered by filename via part_type in config)
 
 Example usage:
-    # Run a specific knot generator
-    python -m led_knots.knots.trefoil --export trefoil.stl
-    
-    # Use the core utilities in custom code
-    from led_knots.core import create_led_circle_face, parse_args, render_part
+    render-knot knot_configs/test_short_rod_led_tube.yaml
+    render-part part_configs/hang_clamp.yaml
+
+    from led_knots.core import create_led_circle_face, render_part
 """
 
 __version__ = "0.1.0"
@@ -22,6 +22,7 @@ __version__ = "0.1.0"
 from .core import (
     # Utilities
     parse_args,
+    parse_render_args,
     render_part,
     scale_pyknot_points,
     sample_path_curvature,
@@ -39,6 +40,7 @@ __all__ = [
     '__version__',
     # Utilities
     'parse_args',
+    'parse_render_args',
     'render_part',
     'scale_pyknot_points',
     'sample_path_curvature',

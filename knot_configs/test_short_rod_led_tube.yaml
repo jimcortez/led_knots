@@ -1,0 +1,72 @@
+knot_type: rod
+
+# -----------------------------------------------------------------------------
+# Output bounds: bounding box for knot path scaling
+# -----------------------------------------------------------------------------
+output_bounds:
+  width: 200    # mm
+  length: 200   # mm
+  height: 100   # mm
+
+face_type: led_circle_tube
+
+face_settings:
+  led_circle_tube:
+    outer_diameter: 30              # mm – tube outer diameter
+    wall_thickness: 4.0             # mm – outer ring wall thickness
+    inner_tube_diameter: 10         # mm – ID of the central circular tube
+    inner_tube_wall_thickness: 0.5  # mm – wall around the central tube
+    connector_width: 0.5            # mm – width of connectors to center tube
+
+# -----------------------------------------------------------------------------
+# Rendering (render bundle exports)
+# -----------------------------------------------------------------------------
+rendering:
+  output_dir: renders
+  name: test_short_rod_led_tube
+  exports:
+    - format: stl
+      enabled: true
+      filename: "{name}.stl"
+      stl_ascii: true
+    - format: preview
+      enabled: true
+      filename: "{name}.png"
+      stl_cache: cache/preview
+      mesh_tolerance: 0.0005
+      mesh_angular_tolerance: 0.04
+      image_width: 800
+      image_height: 600
+      dpi: 100
+      elevation: 30
+      azimuth: 45
+      roll: 0
+      light_azimuth: 225
+      light_elevation: 45
+      color: '#b3b3b3'
+      opacity: 1.0
+      background: '#1a1a2e'
+    - format: glb
+      enabled: true
+      filename: "{name}.glb"
+    - format: config
+      enabled: true
+      filename: "{name}.yaml"
+    - format: stats
+      enabled: true
+      filename: "{name}.csv"
+    - format: step
+      enabled: false
+      filename: "{name}.step"
+    - format: gltf
+      enabled: false
+      filename: "{name}.gltf"
+    - format: 3mf
+      enabled: false
+      filename: "{name}.3mf"
+    - format: obj
+      enabled: false
+      filename: "{name}.obj"
+      unit_scale_mm_to_m: true
+      target_face_count: null
+      watertight_required: false

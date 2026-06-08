@@ -40,16 +40,8 @@ dev = [
     "pytest-cov>=4.0",
 ]
 [project.scripts]
-led-knots-rod = "led_knots.knots.rod:main"
-led-knots-ring = "led_knots.knots.ring:main"
-led-knots-helix = "led_knots.knots.helix:main"
-led-knots-sine-wave = "led_knots.knots.sine_wave:main"
-led-knots-trefoil = "led_knots.knots.trefoil:main"
-led-knots-figure-8 = "led_knots.knots.figure_8:main"
-led-knots-jog-bend = "led_knots.knots.jog_bend:main"
-led-knots-jog-bend-3d = "led_knots.knots.jog_bend_3d:main"
-led-knots-quarter-turn = "led_knots.knots.quarter_turn:main"
-led-knots-twisted-rod = "led_knots.knots.twisted_rod:main"
+render-knot = "led_knots.cli:main_knot"
+render-part = "led_knots.cli:main_part"
 
 [build-system]
 requires = ["hatchling"]

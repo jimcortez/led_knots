@@ -1,9 +1,8 @@
 """
 Dependency-resolved render pipeline for CAD parts.
 
-Resolves CLI outcomes (preview PNG, CAD export, web viewer, mesh OBJ) into a
-small set of artifacts (STL, GLB) built at most once, then fans out to all
-requested outputs.
+Builds a render bundle folder of export jobs (STL, GLB, preview PNG, config YAML,
+stats CSV, optional STEP/GLTF/3MF/OBJ) then optionally uploads to the web viewer.
 """
 
 from __future__ import annotations
@@ -12,46 +11,64 @@ import logging
 import os
 import sys
 import tempfile
-from dataclasses import dataclass
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import cadquery as cq
 import trimesh
+import yaml
 
-from .cache_utils import preview_stl_path_for_part
-from .color_palette import ColoredShape, colored_assembly_shapes, iter_assembly_leaf_solids
-from .preview import render_glb_to_image, render_stl_to_image
+from .config import RenderingExportJob
+from .preview import render_glb_to_image
+from .render_planner import ExportJob, RenderPlanner
 
 logger = logging.getLogger(__name__)
 
-_SUPPORTED_SOLID_EXPORT = {".stl", ".step", ".stp", ".3mf", ".glb", ".gltf"}
-_SUPPORTED_ASSEMBLY_EXPORT = {".step", ".stp", ".stl", ".3mf", ".glb", ".gltf"}
-
 
 def _viewer_tessellation_kwargs(config) -> Dict[str, float]:
-    """Tessellation options for cadquery-web-viewer ``show`` / ``render``."""
-    ps = config.preview_settings
+    vs = config.server_settings.viewer
     return {
-        "tolerance": float(ps.mesh_tolerance),
-        "angular_tolerance": float(ps.mesh_angular_tolerance),
+        "tolerance": float(vs.tessellation_tolerance),
+        "angular_tolerance": float(vs.tessellation_angular_tolerance),
     }
 
 
+def _ensure_remote_viewer_reachable(config) -> None:
+    if config.viewer_server_type != "remote":
+        return
+    import httpx
+
+    ro = config.viewer_remote_options or {}
+    host = str(ro.get("host", "localhost"))
+    port = int(ro.get("port", 32323))
+    timeout = min(float(ro.get("post_timeout", 60.0)), 5.0)
+    url = f"http://{host}:{port}/api/scene"
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            client.get(url)
+    except httpx.HTTPError as exc:
+        logger.error(
+            "Remote cadquery-web-viewer not reachable at http://%s:%s/ (%s). "
+            "Start it in another terminal: cadquery-web-viewer --host %s --port %s",
+            host,
+            port,
+            exc,
+            host,
+            port,
+        )
+        sys.exit(1)
+
+
 def _glb_bytes_via_viewer_render(obj, config, name: str) -> bytes:
-    """Tessellate a CAD object to GLB using cadquery-web-viewer ``render``."""
     from cadquery_web_viewer import render
 
-    glbs = render(obj, names=name, **_viewer_tessellation_kwargs(config))
+    tess_kw = _viewer_tessellation_kwargs(config)
+    glbs = render(obj, names=name, **tess_kw)
     return glbs[0]
 
 
-def _cadquery_web_viewer_show(
-    config,
-    names: Union[str, List[str], None],
-    *objs,
-) -> None:
-    """Send geometry to cadquery-web-viewer (embedded or remote per config)."""
+def _cadquery_web_viewer_show(config, names: Union[str, List[str], None], *objs) -> None:
     from cadquery_web_viewer import show
 
     tess_kw = _viewer_tessellation_kwargs(config)
@@ -95,14 +112,8 @@ def _cadquery_web_viewer_show(
 def _cadquery_web_viewer_show_colored_parts(
     config,
     names: List[str],
-    colored: List[ColoredShape],
+    colored,
 ) -> None:
-    """
-    Show each assembly part with its own ``color_faces`` (and embedded vertex colors).
-
-    Posts one object at a time so per-part colors are not lost when the viewer UI
-    applies a default white material over the mesh.
-    """
     from cadquery_web_viewer import show
 
     tess_kw = _viewer_tessellation_kwargs(config)
@@ -134,115 +145,17 @@ def _cadquery_web_viewer_show_colored_parts(
                 block_until_disconnect=block and idx == len(colored) - 1,
                 **kw,
             )
-    label = ", ".join(names)
-    if st == "remote":
-        ro = config.viewer_remote_options or {}
-        logger.info(
-            "Posted %s (%d parts) to cadquery-web-viewer at http://%s:%s/",
-            label,
-            len(colored),
-            ro.get("host", "localhost"),
-            ro.get("port", 32323),
-        )
-    else:
-        so = config.viewer_server_options or {}
-        logger.info(
-            "cadquery-web-viewer (%s, %d parts): http://%s:%s/",
-            label,
-            len(colored),
-            so.get("host", "127.0.0.1"),
-            so.get("port", 32323),
-        )
 
 
-def _exit_if_remote_viewer_idle(config, *, did_followup_glb_work: bool) -> None:
-    """Exit immediately after remote viewer when no local GLB follow-up work."""
-    if did_followup_glb_work:
-        return
-    if not config.viewer_enabled:
-        return
-    if config.viewer_server_type != "remote":
-        return
-    logger.debug("Remote viewer done with no local GLB follow-up; exiting process.")
-    sys.exit(0)
-
-
-def _maybe_export_mesh_from_glb(glb_bytes: bytes, config) -> None:
-    """Export an OBJ mesh from GLB bytes when ``--output-mesh`` is set."""
-    mesh_cfg = config.mesh
-    output_path = mesh_cfg.filepath
-    if not output_path:
-        return
-
-    ext = os.path.splitext(str(output_path))[1].lower()
-    if ext != ".obj":
-        logger.error("Mesh export only supports .obj for now (got %s).", ext)
-        sys.exit(2)
-
-    try:
-        scene_or_mesh = trimesh.load(
-            trimesh.util.wrap_as_stream(glb_bytes), file_type="glb"
-        )
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.error("Failed to load GLB for mesh export: %r", exc)
-        sys.exit(2)
-
-    if isinstance(scene_or_mesh, trimesh.Scene):
-        mesh = scene_or_mesh.dump(concatenate=True)
-    else:
-        mesh = scene_or_mesh
-
-    if mesh_cfg.unit_scale_mm_to_m:
-        mesh.apply_scale(0.001)
-
-    if hasattr(mesh, "remove_degenerate_faces"):
-        mesh.remove_degenerate_faces()
-    if hasattr(mesh, "remove_unreferenced_vertices"):
-        mesh.remove_unreferenced_vertices()
-    if hasattr(mesh, "merge_vertices"):
-        mesh.merge_vertices()
-
-    if mesh_cfg.watertight_required and not mesh.is_watertight:
-        logger.error("Mesh export aborted: generated mesh is not watertight.")
-        sys.exit(2)
-
-    if mesh_cfg.target_face_count is not None:
-        current_faces = len(mesh.faces)
-        target = mesh_cfg.target_face_count
-        if current_faces > target and target > 0:
-            try:
-                mesh = mesh.simplify_quadratic_decimation(target)
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.warning(
-                    "Mesh decimation failed (%r); continuing with original mesh.",
-                    exc,
-                )
-
-    export_dir = os.path.dirname(str(output_path))
-    if export_dir and not os.path.exists(export_dir):
-        os.makedirs(export_dir, exist_ok=True)
-
-    try:
-        mesh.export(str(output_path), file_type="obj")
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.error("Failed to export OBJ mesh to %s: %r", output_path, exc)
-        sys.exit(2)
-
-    logger.info("Exported mesh OBJ to %s", output_path)
-
-
-def _assembly_to_glb_bytes(assy: cq.Assembly, config) -> bytes:
-    """Export an assembly to GLB bytes using CadQuery (tempfile-backed)."""
+def _assembly_to_glb_bytes(assy: cq.Assembly, *, tolerance: float, angular: float) -> bytes:
     with tempfile.NamedTemporaryFile(suffix=".glb", delete=False) as tf:
         tmp_path = tf.name
     try:
-        tol_val = config.preview_settings.mesh_tolerance
-        ang_val = config.preview_settings.mesh_angular_tolerance
         assy.export(
             tmp_path,
             exportType="GLB",
-            tolerance=float(tol_val),
-            angularTolerance=float(ang_val),
+            tolerance=float(tolerance),
+            angularTolerance=float(angular),
         )
         return Path(tmp_path).read_bytes()
     finally:
@@ -255,32 +168,24 @@ def _assembly_to_glb_bytes(assy: cq.Assembly, config) -> bytes:
 def _solid_to_glb_bytes(
     solid,
     *,
-    config,
-    stl_tolerance: float,
-    stl_angular_tolerance: float,
+    tolerance: float,
+    angular_tolerance: float,
     stl_ascii: bool,
 ) -> bytes:
-    """Generate GLB bytes from a solid via STL tessellation and trimesh."""
     with tempfile.NamedTemporaryFile(suffix=".stl", delete=False) as tf_stl:
         tmp_stl_path = tf_stl.name
     with tempfile.NamedTemporaryFile(suffix=".glb", delete=False) as tf_glb:
         tmp_glb_path = tf_glb.name
-
     try:
         cq.exporters.export(
             solid,
             tmp_stl_path,
-            tolerance=float(stl_tolerance),
-            angularTolerance=float(stl_angular_tolerance),
+            tolerance=float(tolerance),
+            angularTolerance=float(angular_tolerance),
             opt={"ascii": bool(stl_ascii)},
         )
-
         loaded = trimesh.load(tmp_stl_path)
-        if isinstance(loaded, trimesh.Scene):
-            mesh = loaded.dump(concatenate=True)
-        else:
-            mesh = loaded
-
+        mesh = loaded.dump(concatenate=True) if isinstance(loaded, trimesh.Scene) else loaded
         mesh.export(tmp_glb_path, file_type="glb")
         return Path(tmp_glb_path).read_bytes()
     finally:
@@ -293,15 +198,14 @@ def _solid_to_glb_bytes(
 
 def _render_glb_bytes_to_image(
     glb_bytes: bytes,
-    image_path: Union[str, Path],
-    preview_settings,
+    image_path: Path,
+    preview_job: RenderingExportJob,
 ) -> None:
-    """Write GLB bytes to a temp file and render a preview image."""
     with tempfile.NamedTemporaryFile(suffix=".glb", delete=False) as tf:
         tmp_glb = Path(tf.name)
     try:
         tmp_glb.write_bytes(glb_bytes)
-        render_glb_to_image(tmp_glb, Path(image_path), preview_settings)
+        render_glb_to_image(tmp_glb, Path(image_path), preview_job)
     finally:
         try:
             os.unlink(tmp_glb)
@@ -309,81 +213,46 @@ def _render_glb_bytes_to_image(
             pass
 
 
-@dataclass(frozen=True)
-class RenderPlan:
-    """Outcomes and derived artifact needs from ``config``."""
-
-    want_preview_png: bool
-    want_viewer: bool
-    want_mesh_obj: bool
-    export_ext: Optional[str]
-    export_filepath: Optional[str]
-    need_stl_preview: bool
-    need_stl_export: bool
-    need_glb_preview: bool
-    need_glb_export: bool
-    need_step_export: bool
-    preview_uses_export_stl: bool
-    preview_from_glb: bool
-
-    @property
-    def has_side_effects(self) -> bool:
-        return (
-            self.want_preview_png
-            or self.want_viewer
-            or self.want_mesh_obj
-            or self.export_ext is not None
-        )
-
-    @classmethod
-    def from_config(cls, config: Any) -> RenderPlan:
-        export_filepath = config.export.filepath
-        export_ext: Optional[str] = None
-        if export_filepath:
-            export_ext = os.path.splitext(export_filepath)[1].lower()
-
-        want_preview_png = config.preview_filepath is not None
-        want_viewer = bool(config.viewer_enabled)
-        want_mesh_obj = config.mesh.filepath is not None
-
-        preview_uses_export_stl = bool(
-            want_preview_png and export_ext == ".stl" and export_filepath
-        )
-        need_stl_export = export_ext in (".stl", ".3mf")
-        need_step_export = export_ext in (".step", ".stp")
-        need_glb_export = export_ext in (".glb", ".gltf")
-        need_glb_preview = want_viewer
-        preview_from_glb = want_preview_png and (want_viewer or need_glb_export)
-        need_stl_preview = (
-            want_preview_png
-            and not preview_uses_export_stl
-            and not preview_from_glb
-        )
-
-        return cls(
-            want_preview_png=want_preview_png,
-            want_viewer=want_viewer,
-            want_mesh_obj=want_mesh_obj,
-            export_ext=export_ext,
-            export_filepath=export_filepath,
-            need_stl_preview=need_stl_preview,
-            need_stl_export=need_stl_export,
-            need_glb_preview=need_glb_preview,
-            need_glb_export=need_glb_export,
-            need_step_export=need_step_export,
-            preview_uses_export_stl=preview_uses_export_stl,
-            preview_from_glb=preview_from_glb,
-        )
+def _export_obj_from_glb(glb_bytes: bytes, output_path: Path, obj_job: RenderingExportJob) -> None:
+    ext = output_path.suffix.lower()
+    if ext != ".obj":
+        logger.error("OBJ export only supports .obj extension (got %s).", ext)
+        sys.exit(2)
+    try:
+        scene_or_mesh = trimesh.load(trimesh.util.wrap_as_stream(glb_bytes), file_type="glb")
+    except Exception as exc:
+        logger.error("Failed to load GLB for OBJ export: %r", exc)
+        sys.exit(2)
+    mesh = scene_or_mesh.dump(concatenate=True) if isinstance(scene_or_mesh, trimesh.Scene) else scene_or_mesh
+    if obj_job.unit_scale_mm_to_m:
+        mesh.apply_scale(0.001)
+    if hasattr(mesh, "remove_degenerate_faces"):
+        mesh.remove_degenerate_faces()
+    if hasattr(mesh, "remove_unreferenced_vertices"):
+        mesh.remove_unreferenced_vertices()
+    if hasattr(mesh, "merge_vertices"):
+        mesh.merge_vertices()
+    if obj_job.watertight_required and not mesh.is_watertight:
+        logger.error("Mesh export aborted: generated mesh is not watertight.")
+        sys.exit(2)
+    target = obj_job.target_face_count
+    if target is not None and len(mesh.faces) > target > 0:
+        try:
+            mesh = mesh.simplify_quadratic_decimation(target)
+        except Exception as exc:
+            logger.warning("Mesh decimation failed (%r); continuing with original mesh.", exc)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    mesh.export(str(output_path), file_type="obj")
+    logger.info("Exported mesh OBJ to %s", output_path)
 
 
 class PartArtifacts:
-    """Lazy builders for tessellated artifacts and outcome emitters."""
+    """Lazy builders for tessellated artifacts and bundle export emitters."""
 
     def __init__(
         self,
         part: Union[cq.Workplane, cq.Solid, cq.Compound, cq.Assembly],
         config: Any,
-        plan: RenderPlan,
         *,
         path=None,
         aux=None,
@@ -391,20 +260,15 @@ class PartArtifacts:
     ) -> None:
         self.part = part
         self.config = config
-        self.plan = plan
         self.path = path
         self.aux = aux
         self.face_kwargs = face_kwargs or {}
-
         self._solid: Optional[Any] = None
         self._assy: Optional[cq.Assembly] = None
         self._is_assembly = False
         self._normalized = False
-
-        self.stl_preview_path: Optional[Path] = None
-        self.stl_export_written = False
-        self.glb_preview_bytes: Optional[bytes] = None
-        self.glb_export_bytes: Optional[bytes] = None
+        self.stl_written_path: Optional[Path] = None
+        self.glb_bytes: Optional[bytes] = None
 
     def _normalize(self) -> None:
         if self._normalized:
@@ -436,285 +300,178 @@ class PartArtifacts:
         self._normalize()
         return self._is_assembly
 
+    def _tolerances(self) -> tuple[float, float]:
+        r = self.config.rendering
+        return float(r.tolerance), float(r.angular_tolerance)
+
     def _export_solid_to_stl(
         self,
-        dest: Union[str, Path],
+        dest: Path,
         *,
         tolerance: float,
         angular_tolerance: float,
         ascii: bool = False,
     ) -> None:
-        dest_path = Path(dest)
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        dest.parent.mkdir(parents=True, exist_ok=True)
         cq.exporters.export(
             self.solid,
-            str(dest_path),
+            str(dest),
             tolerance=float(tolerance),
             angularTolerance=float(angular_tolerance),
             opt={"ascii": bool(ascii)},
         )
 
-    def ensure_stl_preview(self) -> Path:
-        if self.stl_preview_path is not None:
-            return self.stl_preview_path
+    def ensure_stl_at(self, dest: Path, *, stl_ascii: bool = True) -> Path:
+        if self.stl_written_path == dest and dest.exists():
+            return dest
+        tol, ang = self._tolerances()
+        self._export_solid_to_stl(dest, tolerance=tol, angular_tolerance=ang, ascii=stl_ascii)
+        self.stl_written_path = dest
+        return dest
 
-        ps = self.config.preview_settings
-        tol = ps.mesh_tolerance
-        ang = ps.mesh_angular_tolerance
-
-        if self.path is not None:
-            cached = preview_stl_path_for_part(
-                self.config,
-                self.path,
-                aux=self.aux,
-                face_kwargs=self.face_kwargs,
+    def ensure_glb_bytes(self, *, for_viewer: bool = False) -> bytes:
+        if self.glb_bytes is not None:
+            return self.glb_bytes
+        tol, ang = self._tolerances()
+        if for_viewer and self.config.viewer_enabled:
+            self.glb_bytes = _glb_bytes_via_viewer_render(
+                self.solid, self.config, self.config.name or "Knot"
             )
-            if cached is not None:
-                self._export_solid_to_stl(
-                    cached, tolerance=tol, angular_tolerance=ang, ascii=False
-                )
-                self.stl_preview_path = cached
-                logger.debug("Wrote preview STL cache %s", cached)
-                return cached
-
-        with tempfile.NamedTemporaryFile(suffix=".stl", delete=False) as tf:
-            tmp = Path(tf.name)
-        self._export_solid_to_stl(tmp, tolerance=tol, angular_tolerance=ang, ascii=False)
-        self.stl_preview_path = tmp
-        return tmp
-
-    def ensure_stl_export(self) -> None:
-        if self.stl_export_written or not self.plan.export_filepath:
-            return
-        export_path = self.plan.export_filepath
-        ext = self.plan.export_ext
-        exp = self.config.export
-        cq.exporters.export(
-            self.solid,
-            export_path,
-            tolerance=exp.tolerance,
-            angularTolerance=exp.angular_tolerance,
-            opt={"ascii": exp.stl_ascii} if ext == ".stl" else None,
-        )
-        self.stl_export_written = True
-
-    def ensure_glb_preview(self, name: str) -> bytes:
-        if self.glb_preview_bytes is not None:
-            return self.glb_preview_bytes
-
-        if self.plan.want_viewer:
-            obj = self.solid
-            self.glb_preview_bytes = _glb_bytes_via_viewer_render(obj, self.config, name)
+        elif self.is_assembly and self.assy is not None:
+            self.glb_bytes = _assembly_to_glb_bytes(self.assy, tolerance=tol, angular=ang)
         else:
-            ps = self.config.preview_settings
-            self.glb_preview_bytes = _solid_to_glb_bytes(
+            stl_job = next((j for j in self.config.rendering.exports if j.format == "stl"), None)
+            stl_ascii = bool(getattr(stl_job, "stl_ascii", True)) if stl_job else True
+            self.glb_bytes = _solid_to_glb_bytes(
                 self.solid,
-                config=self.config,
-                stl_tolerance=ps.mesh_tolerance,
-                stl_angular_tolerance=ps.mesh_angular_tolerance,
-                stl_ascii=False,
+                tolerance=tol,
+                angular_tolerance=ang,
+                stl_ascii=stl_ascii,
             )
-        return self.glb_preview_bytes
+        return self.glb_bytes
 
-    def ensure_glb_export(self) -> bytes:
-        if self.glb_export_bytes is not None:
-            return self.glb_export_bytes
+    def _preview_settings_for_job(self, job: ExportJob) -> RenderingExportJob:
+        project_root = Path(__file__).resolve().parent.parent.parent.parent
+        for cfg_job in self.config.rendering.exports:
+            if cfg_job.match_key == job.match_key and cfg_job.format == "preview":
+                return cfg_job
+        return RenderingExportJob({"format": "preview", **job.settings}, project_root)
 
-        exp = self.config.export
-        if self.is_assembly and self.assy is not None:
-            import tempfile as _tf
+    def _obj_settings_for_job(self, job: ExportJob) -> RenderingExportJob:
+        project_root = Path(__file__).resolve().parent.parent.parent.parent
+        for cfg_job in self.config.rendering.exports:
+            if cfg_job.match_key == job.match_key and cfg_job.format == "obj":
+                return cfg_job
+        return RenderingExportJob({"format": "obj", **job.settings}, project_root)
 
-            with _tf.NamedTemporaryFile(suffix=".glb", delete=False) as tf:
-                tmp_path = tf.name
-            try:
-                export_type = "GLB" if self.plan.export_ext == ".glb" else "GLTF"
-                self.assy.export(
-                    tmp_path,
-                    exportType=export_type,
-                    tolerance=exp.tolerance,
-                    angularTolerance=exp.angular_tolerance,
+    def execute_job(self, job: ExportJob) -> None:
+        stats = self.config.render_stats
+        stage = f"render_pipeline.job.{job.format}.{job.resolved_path.name}"
+        cm = stats.record_stage(stage) if stats is not None else nullcontext()
+        with cm:
+            if job.is_dependency_only:
+                logger.info(
+                    "Writing %s (required by %s; %s export disabled in config)",
+                    job.resolved_path.name,
+                    job.dependency_of,
+                    job.format,
                 )
-                self.glb_export_bytes = Path(tmp_path).read_bytes()
-            finally:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-        else:
-            self.glb_export_bytes = _solid_to_glb_bytes(
-                self.solid,
-                config=self.config,
-                stl_tolerance=exp.tolerance,
-                stl_angular_tolerance=exp.angular_tolerance,
-                stl_ascii=exp.stl_ascii,
-            )
-        return self.glb_export_bytes
+            self._execute_job_inner(job)
 
-    def _mesh_glb_bytes(self) -> bytes:
-        if self.glb_preview_bytes is not None:
-            return self.glb_preview_bytes
-        if self.glb_export_bytes is not None:
-            return self.glb_export_bytes
-        if self.plan.need_glb_preview:
-            return self.ensure_glb_preview(self.config.name or "Knot")
-        if self.plan.need_glb_export:
-            return self.ensure_glb_export()
-        ps = self.config.preview_settings
-        if self.is_assembly and self.assy is not None:
-            return _assembly_to_glb_bytes(self.assy, self.config)
-        return _solid_to_glb_bytes(
-            self.solid,
-            config=self.config,
-            stl_tolerance=ps.mesh_tolerance,
-            stl_angular_tolerance=ps.mesh_angular_tolerance,
-            stl_ascii=False,
-        )
+    def _execute_job_inner(self, job: ExportJob) -> None:
+        tol, ang = self._tolerances()
+        path = job.resolved_path
+        path.parent.mkdir(parents=True, exist_ok=True)
 
-    def emit_cad_export(self, name: str) -> None:
-        if not self.plan.export_filepath:
+        if job.format == "stl":
+            stl_ascii = bool(job.settings.get("stl_ascii", True))
+            self.ensure_stl_at(path, stl_ascii=stl_ascii)
+            logger.info("Exported STL to %s", path)
             return
 
-        export_path = self.plan.export_filepath
-        ext = self.plan.export_ext
-        export_dir = os.path.dirname(export_path)
-        if export_dir and not os.path.exists(export_dir):
-            os.makedirs(export_dir, exist_ok=True)
-
-        supported = (
-            _SUPPORTED_ASSEMBLY_EXPORT if self.is_assembly else _SUPPORTED_SOLID_EXPORT
-        )
-        if ext not in supported:
-            kind = "assembly" if self.is_assembly else "solid"
-            logger.error(
-                "Unknown export file extension '%s' for %s. Supported: %s.",
-                ext,
-                kind,
-                ", ".join(sorted(supported)),
-            )
-            sys.exit(2)
-
-        if self.plan.need_step_export:
+        if job.format == "step":
             if self.is_assembly and self.assy is not None:
                 self.assy.export(
-                    export_path,
+                    str(path),
                     exportType="STEP",
                     mode="default",
                     write_pcurves=True,
                     precision_mode=0,
                 )
-                logger.info("Exported %s to %s (STEP assembly)", name, export_path)
             else:
-                exp = self.config.export
-                cq.exporters.export(
-                    self.solid,
-                    export_path,
-                    tolerance=exp.tolerance,
-                    angularTolerance=exp.angular_tolerance,
-                )
-                logger.info("Exported %s to %s (STEP format)", name, export_path)
+                cq.exporters.export(self.solid, str(path), tolerance=tol, angularTolerance=ang)
+            logger.info("Exported STEP to %s", path)
             return
 
-        if ext in (".glb", ".gltf"):
-            glb_bytes = self.ensure_glb_export()
-            if ext == ".glb":
-                with open(export_path, "wb") as f:
-                    f.write(glb_bytes)
-                fmt = "GLB assembly" if self.is_assembly else "GLB format"
-                logger.info("Exported %s to %s (%s)", name, export_path, fmt)
-            else:
-                scene_or_mesh = trimesh.load(
-                    trimesh.util.wrap_as_stream(glb_bytes), file_type="glb"
-                )
-                if isinstance(scene_or_mesh, trimesh.Scene):
-                    mesh = scene_or_mesh.dump(concatenate=True)
-                else:
-                    mesh = scene_or_mesh
-                mesh.export(str(export_path), file_type="gltf")
-                fmt = "GLTF/GLB assembly" if self.is_assembly else "GLTF format"
-                logger.info("Exported %s to %s (%s)", name, export_path, fmt)
+        if job.format == "3mf":
+            self.ensure_stl_at(path, stl_ascii=False)
+            logger.info("Exported 3MF to %s", path)
             return
 
-        if ext in (".stl", ".3mf"):
-            self.ensure_stl_export()
-            label = ext.upper().lstrip(".")
-            if self.is_assembly:
-                logger.info(
-                    "Exported %s to %s (%s fused)",
-                    name,
-                    export_path,
-                    label,
-                )
-            elif ext == ".stl":
-                logger.info("Exported %s to %s (STL format)", name, export_path)
-            else:
-                logger.info("Exported %s to %s (3MF format)", name, export_path)
-
-    def emit_preview_png(self) -> None:
-        if not self.plan.want_preview_png:
-            return
-        image_path = Path(self.config.preview_filepath)
-        ps = self.config.preview_settings
-
-        if self.plan.preview_uses_export_stl:
-            render_stl_to_image(
-                Path(self.plan.export_filepath),
-                image_path,
-                ps,
-            )
-            logger.debug("Wrote preview image %s (from export STL)", image_path)
+        if job.format == "glb":
+            path.write_bytes(self.ensure_glb_bytes())
+            logger.info("Exported GLB to %s", path)
             return
 
-        if self.plan.preview_from_glb:
-            glb = (
-                self.glb_preview_bytes
-                if self.glb_preview_bytes is not None
-                else self.glb_export_bytes
-            )
-            if glb is None:
-                if self.plan.need_glb_preview:
-                    glb = self.ensure_glb_preview(self.config.name or "Knot")
-                else:
-                    glb = self.ensure_glb_export()
-            _render_glb_bytes_to_image(glb, image_path, ps)
-            logger.debug("Wrote preview image %s (from GLB)", image_path)
+        if job.format == "gltf":
+            glb = self.ensure_glb_bytes()
+            scene_or_mesh = trimesh.load(trimesh.util.wrap_as_stream(glb), file_type="glb")
+            mesh = scene_or_mesh.dump(concatenate=True) if isinstance(scene_or_mesh, trimesh.Scene) else scene_or_mesh
+            mesh.export(str(path), file_type="gltf")
+            logger.info("Exported GLTF to %s", path)
             return
 
-        stl_path = self.stl_preview_path
-        if stl_path is None:
-            stl_path = self.ensure_stl_preview()
-        render_stl_to_image(stl_path, image_path, ps)
-        logger.debug("Wrote preview image %s (from preview STL)", image_path)
+        if job.format == "obj":
+            obj_job = self._obj_settings_for_job(job)
+            _export_obj_from_glb(self.ensure_glb_bytes(), path, obj_job)
+            return
+
+        if job.format == "preview":
+            preview_cfg = self._preview_settings_for_job(job)
+            glb = self.ensure_glb_bytes()
+            _render_glb_bytes_to_image(glb, path, preview_cfg)
+            return
+
+        if job.format == "config":
+            self._write_config_yaml(path)
+            return
+
+        if job.format == "stats":
+            if self.config.render_stats is not None:
+                self.config.render_stats.finalize_total_duration()
+                self.config.render_stats.write_csv(path)
+                logger.info("Exported stats CSV to %s", path)
+            return
+
+        logger.error("Unknown export format %r", job.format)
+        sys.exit(2)
+
+    def _write_config_yaml(self, path: Path) -> None:
+        data = dict(self.config._config_data)
+        rendering = dict(data.get("rendering") or {})
+        rendering["name"] = self.config.run_name
+        data["rendering"] = rendering
+        path.write_text(
+            yaml.safe_dump(data, sort_keys=False, default_flow_style=False),
+            encoding="utf-8",
+        )
+        logger.info("Exported config YAML to %s", path)
 
     def emit_viewer(self, name: str) -> None:
-        if not self.plan.want_viewer:
+        if not self.config.viewer_enabled:
             return
         if self.is_assembly and self.assy is not None:
+            from .color_palette import colored_assembly_shapes, iter_assembly_leaf_solids
+
             leaves = iter_assembly_leaf_solids(self.assy)
             if len(leaves) >= 2:
-                base_rgb = self.config.preview_settings._color_rgb
+                preview_job = self.config.rendering.first_preview_job()
+                base_rgb = preview_job._color_rgb if preview_job else (0.7, 0.7, 0.7)
                 part_names, colored = colored_assembly_shapes(self.assy, base_rgb)
                 _cadquery_web_viewer_show_colored_parts(self.config, part_names, colored)
                 return
-        glb = self.ensure_glb_preview(name)
+        glb = self.ensure_glb_bytes(for_viewer=True)
         _cadquery_web_viewer_show(self.config, name, glb)
-
-    def emit_mesh_obj(self) -> bool:
-        """Return True if mesh export ran (for remote idle exit)."""
-        if not self.plan.want_mesh_obj:
-            return False
-        _maybe_export_mesh_from_glb(self._mesh_glb_bytes(), self.config)
-        return True
-
-    def cleanup_temp_stl_preview(self) -> None:
-        if self.stl_preview_path is None:
-            return
-        if self.path is not None:
-            return
-        try:
-            if self.stl_preview_path.exists():
-                self.stl_preview_path.unlink()
-        except OSError:
-            pass
 
 
 def deliver_part(
@@ -725,37 +482,40 @@ def deliver_part(
     aux=None,
     face_kwargs: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """
-    Build artifacts once and emit all configured outcomes (export, preview, viewer, mesh).
-    """
-    plan = RenderPlan.from_config(config)
+    """Build render bundle artifacts and emit all configured export jobs."""
+    if config.render_stats is None:
+        from .render_stats import RenderStats
+
+        config.render_stats = RenderStats()
+        config.render_stats.populate_config_sources(
+            base_path=getattr(config, "config_base_path", None),
+            local_path=getattr(config, "config_local_path", None),
+            overlay_path=getattr(config, "config_path", None),
+        )
+        config.render_stats.populate_git_info()
+        config.render_stats.add_stat("render.run_name", config.run_name, "Resolved run name")
+        config.render_stats.add_stat(
+            "render.bundle_dir",
+            str(config.render_bundle_dir),
+            "Render bundle output directory",
+        )
+
+    plan = RenderPlanner.from_config(config)
     if not plan.has_side_effects:
         return
 
-    ctx = PartArtifacts(
-        part,
-        config,
-        plan,
-        path=path,
-        aux=aux,
-        face_kwargs=face_kwargs,
-    )
+    if plan.want_viewer:
+        _ensure_remote_viewer_reachable(config)
+
+    plan.bundle_dir.mkdir(parents=True, exist_ok=True)
+    ctx = PartArtifacts(part, config, path=path, aux=aux, face_kwargs=face_kwargs)
     ctx._normalize()
+
+    for job in plan.execution_order:
+        ctx.execute_job(job)
+
     name = config.name or "Knot"
-
-    if plan.need_stl_preview:
-        ctx.ensure_stl_preview()
-    if plan.need_stl_export:
-        ctx.ensure_stl_export()
-    if plan.need_glb_preview:
-        ctx.ensure_glb_preview(name)
-    if plan.need_glb_export:
-        ctx.ensure_glb_export()
-
-    ctx.emit_cad_export(name)
-    ctx.emit_preview_png()
     ctx.emit_viewer(name)
-    did_mesh = ctx.emit_mesh_obj()
 
-    ctx.cleanup_temp_stl_preview()
-    _exit_if_remote_viewer_idle(config, did_followup_glb_work=did_mesh)
+    n_files = sum(1 for j in plan.jobs if j.resolved_path.exists())
+    logger.info("Wrote render bundle to %s/ (%d files)", plan.bundle_dir, n_files)

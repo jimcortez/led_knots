@@ -49,7 +49,7 @@ __all__ = [
 _PartT = Union[cq.Workplane, cq.Solid, cq.Compound, cq.Assembly]
 
 
-def _to_trimesh(part: _PartT) -> trimesh.Trimesh:
+def _to_trimesh(part: _PartT, *, name: str = "part") -> trimesh.Trimesh:
     """Tessellate a CadQuery part to a trimesh ``Trimesh`` via temp STL.
 
     Mirrors ``_solid_to_glb_bytes`` in ``led_knots.core.render_pipeline`` but
@@ -66,6 +66,10 @@ def _to_trimesh(part: _PartT) -> trimesh.Trimesh:
     with tempfile.NamedTemporaryFile(suffix=".stl", delete=False) as tf:
         tmp = tf.name
     try:
+        logger.info(
+            "optimize_part: tessellating %s to mesh (coarse STL for orientation search)...",
+            name,
+        )
         cq.exporters.export(
             solid,
             tmp,
@@ -239,6 +243,55 @@ def _filter_candidates_by_bed(
     return out
 
 
+def _populate_optimize_stats(render_stats, report: OptimizationReport) -> None:
+    if render_stats is None:
+        return
+    if report.note:
+        render_stats.add_stat("optimize.note", report.note, "Optimizer summary note")
+    render_stats.add_stat(
+        "optimize.orientation.candidate_count",
+        len(report.orientation_candidates),
+        "Number of orientation candidates evaluated",
+    )
+    if report.applied_candidate is not None:
+        ac = report.applied_candidate
+        render_stats.add_stat(
+            "optimize.orientation.applied_rank",
+            ac.rank,
+            "Rank of the applied orientation candidate",
+        )
+        render_stats.add_stat(
+            "optimize.orientation.applied_angle_deg",
+            f"{ac.angle_deg:.2f}",
+            "Applied rotation angle in degrees",
+        )
+    if report.overhangs is not None:
+        oh = report.overhangs
+        render_stats.add_stat(
+            "optimize.overhangs.area_mm2",
+            f"{oh.total_overhang_area_mm2:.4f}",
+            "Total overhang mesh area in mm²",
+        )
+    if report.islands is not None:
+        render_stats.add_stat(
+            "optimize.islands.count",
+            len(report.islands.components),
+            "Number of disconnected mesh components detected",
+        )
+    if report.cavities is not None:
+        render_stats.add_stat(
+            "optimize.cavities.trapped_count",
+            len(report.cavities.trapped_cavities or []),
+            "Number of trapped internal cavities detected",
+        )
+    if report.drilled_cavities:
+        render_stats.add_stat(
+            "optimize.drain_holes.count",
+            len(report.drilled_cavities),
+            "Number of drain/vent holes drilled",
+        )
+
+
 def optimize_part(
     part: _PartT,
     opt_settings: PrintOptimizationSettings,
@@ -248,6 +301,7 @@ def optimize_part(
     tube_settings=None,
     output_bounds=None,
     bed_clearance_mm: float = 2.0,
+    render_stats=None,
 ) -> Tuple[_PartT, OptimizationReport]:
     """
     Analyze a built part for SLA-print problems and (optionally) re-orient it.
@@ -264,14 +318,16 @@ def optimize_part(
         report.note = (
             "skipped: assembly inputs (segmented prints) land in a follow-up commit"
         )
+        _populate_optimize_stats(render_stats, report)
         return part, report
 
     if not opt_settings.orientation.enabled:
         report.note = "orientation disabled in config"
+        _populate_optimize_stats(render_stats, report)
         return part, report
 
     try:
-        mesh = _to_trimesh(part)
+        mesh = _to_trimesh(part, name=name)
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("optimize_part: tessellation failed (%r); skipping.", exc)
         report.note = f"tessellation failed: {exc!r}"
@@ -442,7 +498,7 @@ def optimize_part(
                 # Re-tessellate after drilling so the annotated PNG and
                 # final mesh reflect the holes.
                 try:
-                    analysis_mesh = _to_trimesh(part)
+                    analysis_mesh = _to_trimesh(part, name=name)
                 except Exception as exc:  # pragma: no cover - defensive
                     logger.warning(
                         "optimize_part: post-drill tessellation failed (%r)", exc
@@ -460,4 +516,5 @@ def optimize_part(
         )
 
     report.mesh = analysis_mesh
+    _populate_optimize_stats(render_stats, report)
     return part, report

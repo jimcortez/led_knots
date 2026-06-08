@@ -37,7 +37,7 @@ This manual is the reference for `led_knots`, a Python toolkit for generating, r
 - **Units.** All lengths are in millimetres (mm) unless a field explicitly says otherwise. Volumes are mm^3, areas are mm^2.
 - **Angles.** All angles are in degrees unless a field explicitly says otherwise. Trigonometric internals convert to radians at the boundary.
 - **Repo paths.** Paths shown like `src/led_knots/core/utils.py` are relative to the repository root (the directory containing `pyproject.toml`). Markdown links in these docs use `../` because docs live one level below the root.
-- **CLI examples.** All `led_knots ...` invocations assume the package has been installed editable (`pip install -e .`) into the active environment. If you prefer not to install, substitute `python -m led_knots ...`.
+- **CLI examples.** `render-knot` and `render-part` assume the package has been installed editable (`pip install -e .` or `uv sync`) into the active environment. Prefix with `uv run` if not using an activated venv.
 - **Coordinate frame.** Z is up; the print bed lies in the XY plane at Z=0 unless a stage repositions the part.
 
 ## Where to start

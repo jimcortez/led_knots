@@ -84,33 +84,24 @@ profile the rest of the sweep is using.
 
 ### Invocation
 
-The clamp is exposed both as an importable function and as a runnable module
-(there is no dedicated `led-knots-hang-clamp` console script).
-
-Run it as a module:
-
 ```bash
-python -m led_knots.parts.hang_clamp
-# or, equivalently, target the file directly:
-python src/led_knots/parts/hang_clamp.py
+render-part part_configs/hang_clamp.yaml
 ```
 
-The module's [`main()`](../src/led_knots/parts/hang_clamp.py#L257) entry point
-calls `get_config(...)` and then `render_part(assembled, config)`, so all the
-standard CLI flags (`--export`, `--output-mesh`, `--preview`, `--server` /
+The config must include `part_type: hang_clamp`. Standard CLI flags (`--server`,
 `--viewer`, `--optimize` / `--auto-orient`, `--optimize-report-dir`, `-v`)
 work — see the [CLI reference](cli-reference.md).
 
 Use it from Python when assembling a larger model:
 
 ```python
-from led_knots.core import get_config
+from led_knots.core.config import load_config
 from led_knots.parts.hang_clamp import (
     build_tube_clamp_parts,
     location_from_point_tangent,
 )
 
-config = get_config(name="Hang Clamp")
+config = load_config(args=...)  # or construct Config with merged YAML
 parts = build_tube_clamp_parts(config)
 
 # Each half is a cq.Solid; or get a cq.Assembly:
@@ -166,24 +157,18 @@ non-positive, if `hole_diameter_in >= outer_diameter_in`, or if `height_in <= 0`
 
 ### Invocation
 
-Run as a module to render the default spacer:
-
 ```bash
-python -m led_knots.parts.planet_spacer
-# or:
-python src/led_knots/parts/planet_spacer.py
+render-part part_configs/planet_spacer.yaml
 ```
 
-[`main()`](../src/led_knots/parts/planet_spacer.py#L63) builds the spacer with
-its defaults and feeds it to `render_part`, so the standard CLI flags apply.
+The config must include `part_type: planet_spacer`. Standard CLI flags apply.
 
 Import it to build custom-sized variants:
 
 ```python
-from led_knots.core import get_config, render_part
+from led_knots.core import render_part
 from led_knots.parts.planet_spacer import build_planet_spacer
 
-config = get_config(name="Planet Spacer")
 spacer = build_planet_spacer(
     outer_diameter_in=2.0,
     height_in=0.375,
@@ -213,31 +198,29 @@ that fits the existing build-and-render pattern.
    import cadquery as cq
    from cadquery.func import *  # functional API style used across the repo
 
-   from led_knots.core import get_config, render_part
+   from led_knots.core import render_part
+   from led_knots.core.config import Config
 
    logger = logging.getLogger(__name__)
 
-   def build_my_bracket(config) -> cq.Solid:
+   def build_my_bracket(config: Config) -> cq.Solid:
        ...
 
-   def main() -> None:
-       config = get_config(name="My Bracket", description="...")
+   def build(config: Config) -> None:
        part = build_my_bracket(config)
        render_part(part, config)
-
-   if __name__ == "__main__":
-       main()
    ```
 
-2. **Decide the invocation surface.**
-   - *Importable only* — drop `main()` and just expose `build_my_bracket`. Use
-     this for helpers consumed by other parts or knot scripts.
-   - *Runnable module* — keep `main()` and the `if __name__ == "__main__":`
-     block. Users invoke it with `python -m led_knots.parts.my_bracket`. Both
-     existing parts ship at this level.
-   - *Console script* — additionally wire a `[project.scripts]` entry (see
-     step 4). This is what the knot scripts do, but neither current part
-     does; only add this if you expect users to call it frequently.
+2. **Add a config file** under `part_configs/` with `part_type` set to your module stem:
+
+   ```yaml
+   part_type: my_bracket
+   rendering:
+     name: my_bracket
+   ```
+
+   Run with `render-part part_configs/my_bracket.yaml`. No `pyproject.toml`
+   entry is needed — parts are discovered by filename.
 
 3. **Wire new config keys into `config.yaml`.** If the part has tunable
    parameters that should live in config rather than as function arguments,
@@ -249,20 +232,7 @@ that fits the existing build-and-render pattern.
    actually prints. Cross-reference the new section in
    [Configuration reference](configuration.md).
 
-4. **(Optional) Add a console script.** If you chose that surface in step 2,
-   register it in [pyproject.toml](../pyproject.toml) under
-   `[project.scripts]`:
-
-   ```toml
-   [project.scripts]
-   led-knots-my-bracket = "led_knots.parts.my_bracket:main"
-   ```
-
-   Re-run `uv sync` (or your install command) so the entry point appears on
-   `PATH`. Existing knot scripts (e.g., `led-knots-trefoil`) follow this same
-   pattern.
-
-5. **Add tests and a preview.** Add a `tests/test_my_bracket.py` exercising
+4. **Add tests and a preview.** Add a `tests/test_my_bracket.py` exercising
    the build function with representative parameters and asserting geometric
    invariants you actually care about (volume bounds, hole exists, halves
    fit together). If the part is visually meaningful, generate a preview
@@ -272,9 +242,9 @@ that fits the existing build-and-render pattern.
 
 **Do**
 
-- Reuse core helpers rather than copy-pasting. `get_config` and `render_part`
-  from [src/led_knots/core/](../src/led_knots/core/) are the canonical way to
-  wire a part into the standard CLI/preview/server pipeline.
+- Reuse core helpers rather than copy-pasting. Expose `build(config)` and call
+  `render_part` from [src/led_knots/core/](../src/led_knots/core/) — `render-part`
+  dispatches to your module via the file-based registry.
 - Use the path-frame helpers from
   [src/led_knots/core/path_frames.py](../src/led_knots/core/path_frames.py)
   (and the local `location_from_point_tangent` pattern shown in

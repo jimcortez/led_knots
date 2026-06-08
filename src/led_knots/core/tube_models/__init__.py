@@ -47,7 +47,9 @@ from .pyramid_studded import PyramidStuddedModel  # noqa: E402
 from .braided_rope import BraidedRopeModel  # noqa: E402
 
 _REGISTRY["pyramid_studded"] = PyramidStuddedModel()
-_REGISTRY["braided_rope"] = BraidedRopeModel()
+_braided_rope_model = BraidedRopeModel()
+_REGISTRY["braided_rope"] = _braided_rope_model
+_REGISTRY["braided_rope_tube"] = _braided_rope_model
 
 
 __all__ = [

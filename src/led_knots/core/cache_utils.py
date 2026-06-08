@@ -7,6 +7,7 @@ rotation/face kwargs, and config (output_bounds, tube_settings, path_settings).
 
 import hashlib
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -23,6 +24,11 @@ def slugify(s: str) -> str:
     s = s.lower().strip()
     s = re.sub(r'[^a-z0-9]+', '-', s)
     return s.strip('-')
+
+
+def render_bundle_stem(run_name: str, *, now: datetime | None = None) -> str:
+    ts = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
+    return f"{slugify(run_name or 'knot')}_{ts}"
 
 
 def _sample_path_points(path, t_step: float = _PATH_HASH_T_STEP) -> list:
@@ -187,7 +193,10 @@ def preview_stl_path_for_part(
     Returns preview_cache_dir / f"{stem}.stl" using the same stem as cache_key_for_part.
     Used when --preview is set and the STL source is the preview cache (not --export .stl).
     """
-    preview_cache_dir = config.preview_settings.preview_cache_dir
+    preview_job = config.rendering.first_preview_job()
+    if preview_job is None:
+        return None
+    preview_cache_dir = preview_job.preview_cache_dir
     stem = cache_key_for_part(
         config.name,
         path,

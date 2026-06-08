@@ -29,36 +29,28 @@ logger = logging.getLogger(__name__)
 # COMMAND LINE PARSING
 # ============================================================================
 
-def parse_args(description: str = "Create and render a knot model"):
-    """
-    Parse command line arguments for knot rendering.
-    
-    Args:
-        description: Description for the argument parser
-        
-    Returns:
-        argparse.Namespace: Parsed arguments with:
-            - export: Optional filepath to export the model to (STL, STEP format)
-            - server: Legacy flag to enable web viewing (uses config server.viewer)
-            - viewer: Optional explicit viewer mode (off / embedded / embedded-block / remote)
-            - verbose: Boolean flag to enable DEBUG level logging
-    """
-    parser = argparse.ArgumentParser(description=description)
+def _add_render_optional_flags(parser: argparse.ArgumentParser) -> None:
+    """Register shared optional flags for render-knot and render-part."""
     parser.add_argument(
-        '--config',
+        '--name',
         type=str,
-        metavar='FILE',
+        metavar='NAME',
         default=None,
-        help=(
-            'YAML config overlay merged on top of config.yaml and config.local.yaml. '
-            'Only specify keys you want to override.'
-        ),
+        help='Run name for the render bundle folder and default filename templates',
     )
     parser.add_argument(
-        '--export',
+        '--renders-dir',
         type=str,
-        metavar='FILEPATH',
-        help='Export the model to the specified file path. Supported formats: .stl, .step, .stp, .3mf'
+        metavar='DIR',
+        default=None,
+        help='Parent directory for render bundles (overrides rendering.output_dir)',
+    )
+    parser.add_argument(
+        '--disable-export',
+        type=str,
+        metavar='FORMATS',
+        default=None,
+        help='Disable export jobs for comma-separated formats (e.g. glb,stats,obj)',
     )
     parser.add_argument(
         '--server',
@@ -81,34 +73,6 @@ def parse_args(description: str = "Create and render a knot model"):
         '-v', '--verbose',
         action='store_true',
         help='Enable verbose (DEBUG level) logging'
-    )
-    parser.add_argument(
-        '--preview',
-        type=str,
-        metavar='FILEPATH',
-        help='Generate a preview image for the model and save to the specified file path'
-    )
-    parser.add_argument(
-        '--output-mesh',
-        type=str,
-        metavar='FILEPATH',
-        help='Export a simulation-focused mesh (currently OBJ only) using trimesh'
-    )
-    parser.add_argument(
-        '--export-parts',
-        type=str,
-        metavar='PARTS',
-        help=(
-            "Optional multi-part export selector (comma-separated). "
-            "Supported tokens: assembly,tube,clamp_a,clamp_b,clamp_halves,all. "
-            "Only applies to knots that build an assembly."
-        ),
-    )
-    parser.add_argument(
-        '--export-parts-dir',
-        type=str,
-        metavar='DIR',
-        help="Directory to write per-part exports when --export-parts is used.",
     )
     # Print optimization (SLA / resin). See config.yaml print_optimization block.
     opt_group = parser.add_mutually_exclusive_group()
@@ -145,13 +109,39 @@ def parse_args(description: str = "Create and render a knot model"):
             'optimizer run to DIR. Implies --optimize.'
         ),
     )
+
+
+def parse_render_args(description: str = "Render a model from a config file"):
+    """
+    Parse command line arguments for render-knot and render-part.
+
+    Args:
+        description: Description for the argument parser
+
+    Returns:
+        argparse.Namespace with a required positional ``config`` path and shared optional flags.
+    """
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument(
+        "config",
+        type=str,
+        metavar="FILE",
+        help=(
+            "YAML config file merged on top of config.yaml and config.local.yaml. "
+            "Must include knot_type (render-knot) or part_type (render-part)."
+        ),
+    )
+    _add_render_optional_flags(parser)
     args = parser.parse_args()
-    
-    # Configure logging if verbose flag is set
+
     if args.verbose:
         logging.basicConfig(level=logging.DEBUG)
-    
+
     return args
+
+
+# Backward-compatible alias for tests and library callers.
+parse_args = parse_render_args
 
 
 def render_part(
@@ -203,54 +193,6 @@ def build_tube_from_path(path, config, aux=None, face_kwargs: Optional[dict] = N
     )
 
 
-def maybe_export_named_parts(named_parts: Dict[str, object], config) -> None:
-    """
-    Optional per-part export helper used by assembly-producing knot scripts.
-
-    Behavior is controlled by CLI flags parsed into config:
-    - config.export_parts: comma-separated tokens (assembly,tube,clamp_a,clamp_b,clamp_halves,all)
-    - config.export_parts_dir: directory to write files into
-    """
-    parts_spec = config.export_parts
-    out_dir = config.export_parts_dir
-    if not parts_spec or not out_dir:
-        return
-
-    tokens = {t.strip().lower() for t in str(parts_spec).split(",") if t.strip()}
-    if "all" in tokens:
-        tokens = {"assembly", "tube", "clamp_a", "clamp_b"}
-    if "clamp_halves" in tokens:
-        tokens.discard("clamp_halves")
-        tokens |= {"clamp_a", "clamp_b"}
-
-    ext = ".stl"
-    if config.export.filepath:
-        ext = os.path.splitext(config.export.filepath)[1].lower() or ".stl"
-    os.makedirs(out_dir, exist_ok=True)
-
-    for key in sorted(tokens):
-        obj = named_parts.get(key)
-        if obj is None:
-            continue
-        out_path = os.path.join(out_dir, f"{(config.name or 'knot')}_{key}{ext}")
-        if isinstance(obj, cq.Assembly):
-            obj.export(
-                out_path,
-                exportType="STEP" if ext in [".step", ".stp"] else ("GLB" if ext == ".glb" else None),
-                tolerance=config.export.tolerance,
-                angularTolerance=config.export.angular_tolerance,
-            )
-        else:
-            solid = obj.val() if hasattr(obj, "val") else obj
-            cq.exporters.export(
-                solid,
-                out_path,
-                tolerance=config.export.tolerance,
-                angularTolerance=config.export.angular_tolerance,
-                opt={"ascii": config.export.stl_ascii} if ext == ".stl" else None,
-            )
-
-
 def draw_part(path, config, aux=None, **face_kwargs):
     """
     Create and render a part by sweeping a face profile along a path.
@@ -260,12 +202,12 @@ def draw_part(path, config, aux=None, **face_kwargs):
     - "solid_circle": Simple filled circle
     - "square": Simple filled square
 
-    When --export or --preview is set, sweeps and renders. With max_print_bounds enabled,
-    sweeps once per printable segment; otherwise one sweep.
+    When print optimization or segmentation is enabled, builds accordingly then
+    writes a render bundle under rendering.output_dir (default renders/).
 
     Args:
         path: CadQuery Wire or Edge representing the sweep path
-        config: Config object with tube_settings, export, viewer_enabled, name
+        config: Config object with tube_settings, rendering, viewer settings
         aux: Optional auxiliary path for sweep orientation
         **face_kwargs: Additional keyword arguments to pass to the face creation function
                        (e.g., rotation_z). orient_to_path is set automatically.
@@ -273,19 +215,42 @@ def draw_part(path, config, aux=None, **face_kwargs):
     Returns:
         The swept solid/compound/assembly result.
     """
+    from .render_stats import RenderStats
+
+    if config.render_stats is None:
+        config.render_stats = RenderStats()
+        config.render_stats.populate_config_sources(
+            base_path=getattr(config, "config_base_path", None),
+            local_path=getattr(config, "config_local_path", None),
+            overlay_path=getattr(config, "config_path", None),
+        )
+        config.render_stats.populate_git_info()
+        config.render_stats.add_stat("render.run_name", config.run_name, "Resolved run name")
+        config.render_stats.add_stat(
+            "render.bundle_dir",
+            str(config.render_bundle_dir),
+            "Render bundle output directory",
+        )
+
     face_kwargs_dict = face_kwargs or {}
 
     logger.debug("Sweeping and rendering.")
-    if config.max_print_bounds.enabled:
-        result = build_segmented_tube_assembly(
-            path,
-            config,
-            build_tube_from_path,
-            aux=aux,
-            face_kwargs=face_kwargs_dict,
-        )
-    else:
-        result = build_tube_from_path(path, config, aux=aux, face_kwargs=face_kwargs_dict)
+    with config.render_stats.record_stage("draw_part.sweep"):
+        if config.max_print_bounds.enabled:
+            result = build_segmented_tube_assembly(
+                path,
+                config,
+                build_tube_from_path,
+                aux=aux,
+                face_kwargs=face_kwargs_dict,
+            )
+        else:
+            result = build_tube_from_path(path, config, aux=aux, face_kwargs=face_kwargs_dict)
+
+    if not isinstance(result, cq.Assembly):
+        from .fuse_utils import fuse_part_solids
+
+        result = fuse_part_solids(result, name=config.name or "part")
 
     if config.print_optimization.enabled:
         # Segmented assemblies are SLA-rescored inside
@@ -299,9 +264,11 @@ def draw_part(path, config, aux=None, **face_kwargs):
             )
         else:
             from led_knots.optimize import optimize_part, format_console
-            # Bed-fit reference: prefer max_print_bounds (the user's
-            # explicit printer dimensions) over output_bounds (which is
-            # the path-scaling target and may exclude tube wall thickness).
+
+            logger.info(
+                "Running print optimization on %s...",
+                config.name or "part",
+            )
             mp = config.max_print_bounds
             if mp.width > 0 and mp.length > 0 and mp.height > 0:
                 bed_bounds = mp
@@ -309,16 +276,22 @@ def draw_part(path, config, aux=None, **face_kwargs):
             else:
                 bed_bounds = config.output_bounds
                 bed_clearance = 2.0
-            result, report = optimize_part(
-                result,
-                config.print_optimization,
-                name=config.name or "part",
-                path=path,
-                tube_settings=config.tube_settings,
-                output_bounds=bed_bounds,
-                bed_clearance_mm=bed_clearance,
-            )
+            with config.render_stats.record_stage("draw_part.optimize"):
+                result, report = optimize_part(
+                    result,
+                    config.print_optimization,
+                    name=config.name or "part",
+                    path=path,
+                    tube_settings=config.tube_settings,
+                    output_bounds=bed_bounds,
+                    bed_clearance_mm=bed_clearance,
+                    render_stats=config.render_stats,
+                )
             print(format_console(report, part_name=config.name or "part"))
+            logger.info(
+                "Print optimization finished (%s); exporting/rendering.",
+                report.note or "ok",
+            )
             report_dir = getattr(config, "optimize_report_dir", None)
             if report_dir and report.mesh is not None:
                 from led_knots.optimize.report import write_annotated_pngs
@@ -328,7 +301,7 @@ def draw_part(path, config, aux=None, **face_kwargs):
                     report.mesh,
                     Path(report_dir),
                     part_name=slugify(config.name or "knot"),
-                    preview_settings=config.preview_settings,
+                    preview_settings=config.rendering.first_preview_job(),
                 )
                 for p in written:
                     logger.info("[optimize] annotated PNG: %s", p)

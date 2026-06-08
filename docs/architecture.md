@@ -72,9 +72,10 @@ flowchart TD
 
 Step-by-step:
 
-1. The knot module (e.g. [trefoil.py](../src/led_knots/knots/trefoil.py)) builds
-   a CadQuery `Wire` describing the centerline. It calls `get_config(...)` to
-   pick up the merged YAML + CLI configuration.
+1. `render-knot` loads the config file (with `knot_type`), merges YAML layers,
+   and dispatches to the knot module's `build(config)` (e.g.
+   [trefoil.py](../src/led_knots/knots/trefoil.py)), which builds a CadQuery
+   `Wire` describing the centerline.
 2. Most knots call
    [`build_ribbon_aux_spine`](../src/led_knots/core/path_utils.py#L476) to
    compute an auxiliary spine that constrains ribbon twist using path curvature
@@ -118,7 +119,8 @@ src/led_knots/
 │   ├── __init__.py
 │   ├── cache_utils.py          # STL preview cache keyed on path + tube settings
 │   ├── color_palette.py        # Per-part colour assignment for viewer / GLB
-│   ├── config.py               # YAML + CLI merging; get_config(); Config object
+│   ├── config.py               # YAML + CLI merging; load_config(); Config object
+│   ├── cli.py                  # render-knot / render-part entry points
 │   ├── led_circle.py           # LED-circle face profile (channel + walls + cavity)
 │   ├── path_frames.py          # Parallel-transported PathFrame sampling
 │   ├── path_utils.py           # spline()/Wire helpers + build_ribbon_aux_spine
@@ -134,7 +136,8 @@ src/led_knots/
 │       ├── swept_face.py       # led_circle / led_circle_tube / solid_circle / square
 │       ├── pyramid_studded.py  # Pyramid-studded tube (compound)
 │       └── braided_rope.py     # Core + N braided strands (compound)
-├── knots/                      # One module per knot, each with a main()
+├── knots/                      # One module per knot, each with build(config)
+│   ├── registry.py             # File-scan discovery and dispatch
 │   ├── __init__.py
 │   ├── figure_8.py, helix.py, jog_bend.py, jog_bend_3d.py,
 │   ├── k4_1.py, k8_21.py, quarter_turn.py, ring.py, rod.py,
@@ -220,24 +223,25 @@ extension recipe.
 ### Config
 
 Configuration is a layered YAML + CLI structure exposed through
-[`get_config(...)`](../src/led_knots/core/config.py#L643). On first call it:
+[`load_config(...)`](../src/led_knots/core/config.py). It:
 
 1. Loads `config.yaml` from the repo root.
 2. Deep-merges `config.local.yaml` on top, if present.
-3. Parses CLI args early; if `--config FILE` is set, deep-merges that overlay
-   on top (relative paths resolve against the repo root).
-4. Resolves the active `face_type` and its `face_settings.<face_type>` block via
+3. Deep-merges the config file passed to `render-knot` / `render-part`
+   (relative paths resolve against the repo root).
+4. Reads `knot_type` / `part_type` from the merged data for model dispatch.
+5. Resolves the active `face_type` and its `face_settings.<face_type>` block via
    [`resolve_face_settings`](../src/led_knots/core/config.py#L46), which walks
    the optional `inherit_from` chain and deep-merges parent keys with child
    keys — so a `face_settings.led_circle_v2` block can `inherit_from:
    led_circle` and only override the deltas. Cycles and missing parents are
    detected and raised.
-5. Builds a `TubeSettings(face_type, resolved_face_data)` convenience object
+6. Builds a `TubeSettings(face_type, resolved_face_data)` convenience object
    that knot modules use as `config.tube_settings.<key>` without having to know
    which face type they were called with.
-6. Applies per-flag CLI overrides (e.g. `--export`, `--preview`, `--viewer`,
-   `--optimize / --no-optimize`, `--auto-orient`,
-   `--optimize-report-dir`, `--export-parts`) on top of the merged YAML.
+7. Applies per-flag CLI overrides (`--name`, `--renders-dir`, `--disable-export`,
+   `--viewer`, `--optimize` / `--no-optimize`, `--auto-orient`,
+   `--optimize-report-dir`) on top of the merged YAML.
 
 The returned `Config` exposes substructures used throughout the pipeline:
 `output_bounds`, `tube_settings`, `path_settings`, `max_print_bounds`,

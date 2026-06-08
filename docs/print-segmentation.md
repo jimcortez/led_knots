@@ -203,11 +203,11 @@ A segmented run yields a `cq.Assembly` with one child per segment named `segment
 For multi-part STL/STEP/GLB output, [maybe_export_named_parts](../src/led_knots/core/utils.py#L196) accepts a comma-separated selector on the CLI:
 
 ```bash
-python -m led_knots.knots.trefoil --export model.stl \
+render-knot knot_configs/my_trefoil.yaml \
   --export-parts assembly,tube,clamp_halves \
   --export-parts-dir out/
 # Or equivalently with the installed console script:
-# led-knots-trefoil --export model.stl --export-parts ... --export-parts-dir out/
+# render-knot knot_configs/my_trefoil.yaml --disable-export preview,glb
 ```
 
 Supported tokens:

@@ -5,7 +5,8 @@ import logging
 import cadquery as cq
 from cadquery.func import *  # match project functional API style
 
-from led_knots.core import get_config, render_part
+from led_knots.core import render_part
+from led_knots.core.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -60,11 +61,6 @@ def build_planet_spacer(
     return solid
 
 
-def main() -> None:
-    config = get_config(name="Planet Spacer", description="Create and render a thick washer-like spacer")
+def build(config: Config) -> None:
     spacer = build_planet_spacer()
     render_part(spacer, config)
-
-
-if __name__ == "__main__":
-    main()

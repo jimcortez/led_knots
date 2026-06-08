@@ -6,18 +6,15 @@ along a vertical path. The path construction is the focus here;
 """
 
 import logging
+
 from cadquery.func import spline
-from led_knots.core import draw_part, get_config
+
+from led_knots.core import draw_part
+from led_knots.core.config import Config
 
 logger = logging.getLogger(__name__)
 
-# Load configuration
-config = get_config(
-    name="Rod Knot",
-    description="Create and render a rod knot (straight vertical pipe)"
-)
 
-path = spline([(0, 0, 0), (0, 0, config.output_bounds.height)])
-
-# Create, sweep, and render the part
-draw_part(path, config)
+def build(config: Config) -> None:
+    path = spline([(0, 0, 0), (0, 0, config.output_bounds.height)])
+    draw_part(path, config)

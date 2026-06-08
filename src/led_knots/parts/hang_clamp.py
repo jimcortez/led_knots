@@ -8,7 +8,8 @@ import cadquery as cq
 import numpy as np
 from cadquery.func import *  # match project functional API style
 
-from led_knots.core import get_config, render_part
+from led_knots.core import render_part
+from led_knots.core.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -254,15 +255,8 @@ def build_tube_clamp_parts(config) -> TubeClampParts:
     return TubeClampParts(half_with_hole=half_pos, half_plain=half_neg)
 
 
-def main() -> None:
-    config = get_config(name="Hang Clamp", description="Create and render a 2-part hang clamp")
-
+def build(config: Config) -> None:
     parts = build_tube_clamp_parts(config)
-    
     assembled = parts.to_assembly()
     render_part(assembled, config)
-
-
-if __name__ == "__main__":
-    main()
 

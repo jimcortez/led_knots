@@ -1,0 +1,45 @@
+"""Tests for render stats collection and CSV output."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from led_knots.core.render_stats import RenderStats
+
+
+def test_add_stat_namespacing():
+    stats = RenderStats()
+    stats.add_stat("draw_part.sweep.duration_s", 1.25, "Sweep stage duration")
+    assert len(stats._stats) == 1
+    assert stats._stats[0].name == "draw_part.sweep.duration_s"
+
+
+def test_write_csv_column_alignment(tmp_path: Path):
+    stats = RenderStats()
+    stats.add_stat("a", "x", "short")
+    stats.add_stat("longer.name", "value", "much longer description field")
+    out = tmp_path / "stats.csv"
+    stats.write_csv(out)
+    text = out.read_text(encoding="utf-8")
+    lines = text.strip().splitlines()
+    assert len(lines) == 3
+    assert lines[0].startswith("name")
+    assert ", " in lines[1]
+    widths = [len(part) for part in lines[1].split(", ")]
+    widths2 = [len(part) for part in lines[2].split(", ")]
+    assert widths[0] == widths2[0]
+    assert widths[1] == widths2[1]
+
+
+def test_git_and_config_sources_populated(tmp_path: Path):
+    stats = RenderStats()
+    stats.populate_config_sources(
+        base_path=tmp_path / "config.yaml",
+        local_path=tmp_path / "config.local.yaml",
+        overlay_path=None,
+    )
+    stats.populate_git_info()
+    names = {s.name for s in stats._stats}
+    assert "config.sources.base" in names
+    assert "git.branch" in names
+    assert "git.commit" in names

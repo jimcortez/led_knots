@@ -238,7 +238,7 @@ env vars via `_ENV_MAP`:
 | `server.color_edges` | `CADQUERY_WEB_VIEWER_COLOR_EDGES` |
 | `server.color_vertices` | `CADQUERY_WEB_VIEWER_COLOR_VERTICES` |
 
-`get_config()` calls `apply_to_env()` before any of your code imports
+`load_config()` calls `apply_to_env()` before any of your code imports
 `cadquery_web_viewer`, so values set in `config.yaml` win
 ([config.py:664](../src/led_knots/core/config.py#L664)). Keys that are
 left unset in YAML are not written to the environment at all, so an
@@ -294,7 +294,7 @@ batch driver used to keep `assets/*.png` (referenced from the
    `ring`, `jog_bend`, `jog_bend_3d`, `helix`, `figure_8`, `trefoil`,
    `k4_1`, `stevedore`).
 2. For each name, invokes
-   `python -m led_knots.knots.<name> --preview assets/<name>.png` as a
+   `render-knot knot_configs/<name>.yaml` (preview PNG in the render bundle) as a
    subprocess from the project root (`subprocess.run(..., timeout=300)`).
 3. Reopens the resulting PNG and overlays a black label box with the
    display name in the bottom-left, then writes it back in place.

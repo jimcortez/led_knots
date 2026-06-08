@@ -16,8 +16,8 @@ output_bounds:
   height: 200     # mm
 
 # Active tube model: led_circle | led_circle_tube | solid_circle | square |
-# pyramid_studded | braided_rope
-face_type: led_circle_tube
+# pyramid_studded | braided_rope | braided_rope_tube
+face_type: braided_rope_tube
 
 # -----------------------------------------------------------------------------
 # Face-specific settings (keyed by face type)
@@ -66,6 +66,7 @@ face_settings:
   braided_rope:
     inherit_from: solid_circle
     braided_rope:
+      base_face_type: braid_core     # braid_core | solid_circle | led_circle_tube | ...
       num_strands_per_dir: 25        # total strands = 2 × this
       float_length: 1                # F: 1=1×1 diamond, 2=2×2 regular, n×n
       helix_angle_deg: 30.0
@@ -76,6 +77,22 @@ face_settings:
       samples_per_period: 20
       strand_start: 2.0              # mm – trim from path start
       strand_end_offset: 2.0         # mm – trim from path end
+
+  # Braided-rope sleeve on an LED tube (inner wire hole + connectors).
+  braided_rope_tube:
+    inherit_from: led_circle_tube
+    braided_rope:
+      base_face_type: led_circle_tube
+      num_strands_per_dir: 25
+      float_length: 1
+      helix_angle_deg: 30.0
+      strand_aspect_ratio: 1.6
+      tilt_to_helix_angle: true
+      weave_amplitude_factor: 1.05
+      pack_factor: 0.7
+      samples_per_period: 20
+      strand_start: 2.0
+      strand_end_offset: 2.0
 
 # -----------------------------------------------------------------------------
 # Path / twist limits
@@ -202,49 +219,61 @@ server:
     remote:
       host: localhost
       port: 32323
+    # Tessellation for --server / --viewer (coarser than preview.mesh_tolerance for speed)
+    tessellation_tolerance: 0.05       # mm
+    tessellation_angular_tolerance: 0.1 # rad
 
 # -----------------------------------------------------------------------------
-# Export (3D file output)
+# Rendering (render bundle exports)
 # -----------------------------------------------------------------------------
-export:
-  tolerance: 0.0001         # linear tolerance
-  angular_tolerance: 0.05   # rad
-  stl_ascii: true           # true = ASCII STL, false = binary
-
-# -----------------------------------------------------------------------------
-# Mesh export (simulation-focused OBJ output)
-# -----------------------------------------------------------------------------
-mesh:
-  # Optional unit scaling for mesh export. If true, convert dimensions
-  # from millimeters (CadQuery default) to meters
-  unit_scale_mm_to_m: true
-
-  # Optional maximum triangle count for mesh decimation. If null or
-  # omitted, no automatic decimation is applied. When set, trimesh will
-  # attempt to simplify the mesh to approximately this many faces.
-  target_face_count: null
-
-  # Require watertight (closed) meshes for export. If true and the
-  # generated mesh is not watertight, mesh export will fail with a
-  # clear error instead of writing a partial mesh.
-  watertight_required: false
-
-# -----------------------------------------------------------------------------
-# Preview (mesh → image; finer tessellation for smooth tube appearance)
-# -----------------------------------------------------------------------------
-preview:
-  stl_cache: cache/preview   # directory path
-  # Tessellation for preview mesh (smaller = smoother; used when generating preview image)
-  mesh_tolerance: 0.0005     # linear (mm); finer than export for smooth tube
-  mesh_angular_tolerance: 0.04 # rad
-  image_width: 800           # px
-  image_height: 600         # px
-  dpi: 100                   # dots per inch
-  elevation: 30              # deg – 3D view elevation
-  azimuth: 45                # deg – 3D view azimuth
-  roll: 0                    # deg – 3D view roll
-  light_azimuth: 225         # deg – light direction azimuth
-  light_elevation: 45        # deg – light direction elevation
-  color: '#b3b3b3'           # hex or name – model color; also base hue for per-part colors in --server viewer when the result is a multi-part assembly
-  opacity: 1.0               # 0.0–1.0
-  background: '#1a1a2e'      # hex or name – background color
+rendering:
+  output_dir: renders
+  name: null
+  tolerance: 0.0001
+  angular_tolerance: 0.05
+  exports:
+    - format: stl
+      enabled: true
+      filename: "{name}.stl"
+      stl_ascii: true
+    - format: preview
+      enabled: true
+      filename: "{name}.png"
+      stl_cache: cache/preview
+      mesh_tolerance: 0.0005
+      mesh_angular_tolerance: 0.04
+      image_width: 800
+      image_height: 600
+      dpi: 100
+      elevation: 30
+      azimuth: 45
+      roll: 0
+      light_azimuth: 225
+      light_elevation: 45
+      color: '#b3b3b3'
+      opacity: 1.0
+      background: '#1a1a2e'
+    - format: glb
+      enabled: true
+      filename: "{name}.glb"
+    - format: config
+      enabled: true
+      filename: "{name}.yaml"
+    - format: stats
+      enabled: true
+      filename: "{name}.csv"
+    - format: step
+      enabled: false
+      filename: "{name}.step"
+    - format: gltf
+      enabled: false
+      filename: "{name}.gltf"
+    - format: 3mf
+      enabled: false
+      filename: "{name}.3mf"
+    - format: obj
+      enabled: false
+      filename: "{name}.obj"
+      unit_scale_mm_to_m: true
+      target_face_count: null
+      watertight_required: false

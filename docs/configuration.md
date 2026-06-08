@@ -14,9 +14,9 @@ Two files at the repository root drive configuration, plus an optional CLI overl
 | --- | --- | --- |
 | [config.yaml](../config.yaml) | Committed defaults. The source of truth for what every key means and what its default value is. | Yes |
 | [config.local.yaml](../config.local.yaml) | Personal/local overrides. Set only the keys you want to change; the rest are inherited from `config.yaml`. | No (in [.gitignore](../.gitignore)) |
-| `--config FILE` | Named overlay selected at runtime (e.g. `configs/permutations/trefoil-tight.yaml`). Deep-merged on top of both YAML files. Relative paths resolve against the repo root. | Yes (when stored under `configs/`) |
+| Config file (positional) | Passed to `render-knot` or `render-part` (e.g. `knot_configs/test_short_rod_led_tube.yaml`). Deep-merged on top of both YAML files. Relative paths resolve against the repo root. | Yes (when stored under `knot_configs/` or `part_configs/`) |
 
-`get_config()` in [src/led_knots/core/config.py](../src/led_knots/core/config.py)
+`load_config()` in [src/led_knots/core/config.py](../src/led_knots/core/config.py)
 is the single entry point. Every knot script, every CLI, and the notebook all
 call it; there is no other supported way to read configuration. It returns a
 cached `Config` singleton, parses CLI args (see
@@ -24,9 +24,10 @@ cached `Config` singleton, parses CLI args (see
 `CADQUERY_WEB_VIEWER_*` environment variables before the viewer is imported.
 
 ```python
-from led_knots.core.config import get_config
+from led_knots.core.config import load_config
+from led_knots.core.utils import parse_render_args
 
-cfg = get_config(description="Trefoil knot", name="trefoil")
+cfg = load_config(args=parse_render_args())
 print(cfg.tube_settings.outer_radius)
 print(cfg.output_bounds.width, cfg.output_bounds.length, cfg.output_bounds.height)
 ```
@@ -45,7 +46,7 @@ Defined by [`Config.__init__`](../src/led_knots/core/config.py#L491) and
       defaults to 100 mm if `output_bounds` is omitted).
    2. Values in `config.yaml`.
    3. Values in `config.local.yaml` (if the file exists).
-   4. Values in the `--config FILE` overlay (if the flag is passed).
+   4. Values in the config file passed to `render-knot` or `render-part`.
    5. CLI arguments (only a small subset, see below).
 2. **Deep merge.** Dictionaries are merged recursively. If a key exists in
    both files and both values are dicts, the dicts are merged key-by-key. If a
@@ -53,8 +54,8 @@ Defined by [`Config.__init__`](../src/led_knots/core/config.py#L491) and
    wholesale. Lists are **not** appended — they are replaced.
 3. **Missing files.** `config.yaml` is mandatory; if it is missing,
    `open()` raises `FileNotFoundError`. `config.local.yaml` is optional —
-   absence is silently ignored. When `--config FILE` is passed, the overlay
-   file must exist or the loader raises `FileNotFoundError`. An empty YAML
+   absence is silently ignored. The config file passed on the CLI must exist
+   or the loader raises `FileNotFoundError`. An empty YAML
    file is treated as `{}`.
 4. **Invalid YAML.** `yaml.safe_load` raises `yaml.YAMLError`. The loader
    does not catch it; the script crashes with the parser's line/column.
@@ -62,13 +63,39 @@ Defined by [`Config.__init__`](../src/led_knots/core/config.py#L491) and
    and raises `ValueError` with the dotted path of the bad key (for example
    `clamp.length_mm must be > 0 (got -1.0)`).
 6. **CLI overrides** (parsed by
-   [`parse_args`](../src/led_knots/core/utils.py)) only touch a few fields:
-   `export.filepath` (from `--export`), `mesh.filepath` (from `--output-mesh`),
+   [`parse_render_args`](../src/led_knots/core/utils.py)) touch
+   `rendering.name` (from `--name`), `rendering.output_dir` (from
+   `--renders-dir`), disabled export formats (from `--disable-export`),
    `print_optimization.enabled` (from `--optimize` / `--no-optimize` /
    `--auto-orient`), `print_optimization.orientation.auto_apply` (from
    `--auto-orient`), and viewer mode (from `--viewer` / `--server`).
 
 ## Section-by-section reference
+
+### `knot_type` and `part_type`
+
+Model selection lives in the config file so each render run is traceable from
+its exported YAML snapshot.
+
+| Key | Command | Meaning |
+| --- | --- | --- |
+| `knot_type` | `render-knot` | Stem of a module under `src/led_knots/knots/` (e.g. `rod`, `trefoil`, `figure_8`). Required for knot renders. |
+| `part_type` | `render-part` | Stem of a module under `src/led_knots/parts/` (e.g. `hang_clamp`, `planet_spacer`). Required for part renders. |
+
+Modules are discovered by filename — adding `my_knot.py` with a `build(config)`
+function and setting `knot_type: my_knot` is sufficient; no `pyproject.toml`
+entry is needed.
+
+Example knot config: [knot_configs/test_short_rod_led_tube.yaml](../knot_configs/test_short_rod_led_tube.yaml).
+
+Example part config: [part_configs/hang_clamp.yaml](../part_configs/hang_clamp.yaml).
+
+Run name resolution (for render bundle folder and `{name}` templates):
+
+1. `--name` CLI flag
+2. `rendering.name` in YAML
+3. `knot_type` or `part_type`
+4. `"knot"` fallback
 
 ### `output_bounds`
 
@@ -410,7 +437,7 @@ Auto-drill drain + vent holes through trapped resin cavities. Requires
 
 cadquery-web-viewer styling and the viewer connection. The top-level
 `server.*` styling keys are forwarded to the viewer as
-`CADQUERY_WEB_VIEWER_*` environment variables when `get_config(...)` is
+`CADQUERY_WEB_VIEWER_*` environment variables when `load_config(...)` is
 called with `set_env_vars=True` (the default).
 
 ```yaml
@@ -653,7 +680,7 @@ face_settings:
 ```
 
 ```bash
-led-knots-trefoil --config configs/permutations/braided-tight.yaml --export out/trefoil-tight.stl
+render-knot configs/permutations/braided-tight.yaml
 ```
 
 ### 2. Make every model larger

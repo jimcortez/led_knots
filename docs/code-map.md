@@ -4,7 +4,7 @@ A per-file reference of the `led_knots` package, its scripts, and its tests. Use
 
 ## src/led_knots/
 
-Top-level package. [`__init__.py`](../src/led_knots/__init__.py) declares `__version__` and re-exports the everyday helpers from `core` (`parse_args`, `render_part`, `scale_pyknot_points`, the path-utility functions, and the `create_*_face` cross-section factories) so user scripts can `from led_knots import ...` without diving into subpackages. Subpackages: [`core`](#srcled_knotscore) (shared utilities and the CAD pipeline), [`core/tube_models`](#srcled_knotscoretube_models) (face-type registry), [`knots`](#srcled_knotsknots) (one console script per knot/path), [`optimize`](#srcled_knotsoptimize) (SLA print-prep stage), and [`parts`](#srcled_knotsparts) (accessory hardware).
+Top-level package. [`__init__.py`](../src/led_knots/__init__.py) declares `__version__` and re-exports the everyday helpers from `core` (`parse_args`, `render_part`, `scale_pyknot_points`, the path-utility functions, and the `create_*_face` cross-section factories) so user scripts can `from led_knots import ...` without diving into subpackages. Subpackages: [`core`](#srcled_knotscore) (shared utilities and the CAD pipeline), [`core/tube_models`](#srcled_knotscoretube_models) (face-type registry), [`knots`](#srcled_knotsknots) (knot path builders), [`optimize`](#srcled_knotsoptimize) (SLA print-prep stage), and [`parts`](#srcled_knotsparts) (accessory hardware). CLI entry points: `render-knot` and `render-part` in [`cli.py`](../src/led_knots/cli.py).
 
 ## src/led_knots/core/
 
@@ -24,7 +24,7 @@ Shared CAD pipeline: config loading, path framing, tube sweeping, segmentation, 
 | [`print_segmentation.py`](../src/led_knots/core/print_segmentation.py) | Wire-driven segmentation: splits a tube into print-bed-sized chunks with joints. See [Print segmentation](print-segmentation.md). |
 | [`pyknot_utils.py`](../src/led_knots/core/pyknot_utils.py) | `scale_pyknot_points`: aspect-preserving rescale of pyknotid point arrays into a target bounding box. |
 | [`render_pipeline.py`](../src/led_knots/core/render_pipeline.py) | Dependency-resolved render pipeline: turns CLI outcomes (preview / export / viewer / mesh) into STL + GLB built at most once and fanned out. |
-| [`utils.py`](../src/led_knots/core/utils.py) | `parse_args`, `render_part`, `draw_part`, `build_tube_from_path`, `maybe_export_named_parts` — the high-level glue every knot module calls. |
+| [`utils.py`](../src/led_knots/core/utils.py) | `parse_render_args`, `render_part`, `draw_part`, `build_tube_from_path` — the high-level glue every knot module calls. |
 
 ## src/led_knots/core/tube_models/
 
@@ -40,30 +40,27 @@ Registry of `face_type → TubeModel` implementations. A `TubeModel` turns a cen
 
 ## src/led_knots/knots/
 
-One module per centerline shape. Each runs its entire pipeline at module
-import time (no `main()` wrapper) by calling `draw_part(path, config)` after
-constructing its path. The canonical invocation is `python -m
-led_knots.knots.<name>`; ten of the modules also have `led-knots-*` console
-scripts listed in [pyproject.toml](../pyproject.toml#L42) (see the
-console-script note in the [developer guide](developer-guide.md)).
+One module per centerline shape. Each exposes `build(config)` and is discovered
+by filename via [`registry.py`](../src/led_knots/knots/registry.py). Set
+`knot_type` in a config YAML and run `render-knot <config.yaml>`.
 
-| Module | Console script | Shape |
+| Module | `knot_type` | Shape |
 | --- | --- | --- |
-| [`rod.py`](../src/led_knots/knots/rod.py) | `led-knots-rod` | Straight vertical pipe along Z. |
-| [`ring.py`](../src/led_knots/knots/ring.py) | `led-knots-ring` | Simple circular ring (uses pyknotid `unknot`). |
-| [`helix.py`](../src/led_knots/knots/helix.py) | `led-knots-helix` | Helical spiral; computes pitch angle from pitch and radius. |
-| [`sine_wave.py`](../src/led_knots/knots/sine_wave.py) | `led-knots-sine-wave` | Multi-period sine wave path. |
-| [`trefoil.py`](../src/led_knots/knots/trefoil.py) | `led-knots-trefoil` | Mathematical trefoil knot via `pyknotid.make.trefoil` and a ribbon aux spine. |
-| [`figure_8.py`](../src/led_knots/knots/figure_8.py) | `led-knots-figure-8` | Figure-8 / torus knot via `pyknotid.make.torus_knot`. |
-| [`jog_bend.py`](../src/led_knots/knots/jog_bend.py) | `led-knots-jog-bend` | 2D jog bend (S-curve in one plane). |
-| [`jog_bend_3d.py`](../src/led_knots/knots/jog_bend_3d.py) | `led-knots-jog-bend-3d` | 3D jog bend with ribbon-aware twist control. |
-| [`quarter_turn.py`](../src/led_knots/knots/quarter_turn.py) | `led-knots-quarter-turn` | 90° turn between two tangent-controlled endpoints. |
-| [`twisted_rod.py`](../src/led_knots/knots/twisted_rod.py) | `led-knots-twisted-rod` | Straight rod with a 90° twist driven by an auxiliary helical spine. |
-| [`stevedore.py`](../src/led_knots/knots/stevedore.py) | (no script — run via `python -m`) | Stevedore knot (k6_1) via `pyknotid.make`. |
-| [`k4_1.py`](../src/led_knots/knots/k4_1.py) | (no script — run via `python -m`) | k4_1 knot via `pyknotid.make`. |
-| [`k8_21.py`](../src/led_knots/knots/k8_21.py) | (no script — run via `python -m`) | k8_21 knot via `pyknotid.make`. |
+| [`rod.py`](../src/led_knots/knots/rod.py) | `rod` | Straight vertical pipe along Z. |
+| [`ring.py`](../src/led_knots/knots/ring.py) | `ring` | Simple circular ring. |
+| [`helix.py`](../src/led_knots/knots/helix.py) | `helix` | Helical spiral. |
+| [`sine_wave.py`](../src/led_knots/knots/sine_wave.py) | `sine_wave` | Multi-period sine wave path. |
+| [`trefoil.py`](../src/led_knots/knots/trefoil.py) | `trefoil` | Trefoil knot with ribbon aux spine. |
+| [`figure_8.py`](../src/led_knots/knots/figure_8.py) | `figure_8` | Figure-8 / torus knot. |
+| [`jog_bend.py`](../src/led_knots/knots/jog_bend.py) | `jog_bend` | 2D jog bend. |
+| [`jog_bend_3d.py`](../src/led_knots/knots/jog_bend_3d.py) | `jog_bend_3d` | 3D jog bend with ribbon-aware twist. |
+| [`quarter_turn.py`](../src/led_knots/knots/quarter_turn.py) | `quarter_turn` | 90° turn. |
+| [`twisted_rod.py`](../src/led_knots/knots/twisted_rod.py) | `twisted_rod` | Straight rod with 90° twist. |
+| [`stevedore.py`](../src/led_knots/knots/stevedore.py) | `stevedore` | Stevedore knot (k6_1). |
+| [`k4_1.py`](../src/led_knots/knots/k4_1.py) | `k4_1` | k4_1 knot. |
+| [`k8_21.py`](../src/led_knots/knots/k8_21.py) | `k8_21` | k8_21 knot. |
 
-See [CLI reference](cli-reference.md) for the flags every knot accepts.
+See [CLI reference](cli-reference.md) for flags and config layout.
 
 ## src/led_knots/optimize/
 

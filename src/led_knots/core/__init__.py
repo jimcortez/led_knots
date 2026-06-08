@@ -10,10 +10,10 @@ This module provides shared utilities for creating knot models including:
 
 from .utils import (
     parse_args,
+    parse_render_args,
     render_part,
     draw_part,
     build_tube_from_path,
-    maybe_export_named_parts,
 )
 from .pyknot_utils import scale_pyknot_points
 from .path_utils import (
@@ -31,16 +31,16 @@ from .led_circle import (
     create_square_face,
 )
 
-from .config import get_config
+from .config import get_config, load_config
 from .cache_utils import cache_key_for_part
 
 __all__ = [
     # Utils
     'parse_args',
+    'parse_render_args',
     'render_part',
     'draw_part',
     'build_tube_from_path',
-    'maybe_export_named_parts',
     'scale_pyknot_points',
     'sample_path_curvature',
     'sample_path_for_profiles',
@@ -54,6 +54,7 @@ __all__ = [
     'create_square_face',
     # Config
     'get_config',
+    'load_config',
     # Cache
     'cache_key_for_part',
 ]

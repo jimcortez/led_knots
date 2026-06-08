@@ -24,6 +24,7 @@ from cadquery import Vector, Wire, Plane, Edge
 from cadquery.occ_impl.shapes import Compound, Solid
 
 from ..path_frames import PathFrame, frame_at_arc_length, sample_path_frames
+from .swept_face import SweptFaceModel
 
 logger = logging.getLogger(__name__)
 
@@ -295,14 +296,45 @@ _PARAM_KEYS = {
     "strand_end_offset",
 }
 
+_SWEPT_BASE_FACE_TYPES = frozenset({
+    "led_circle",
+    "led_circle_tube",
+    "solid_circle",
+    "square",
+})
 
-def _params_from_config(config: Any) -> BraidParams:
+
+def _base_face_type(config: Any) -> str:
+    raw = getattr(config.tube_settings, "braided_rope", None) or {}
+    return str(raw.get("base_face_type", "braid_core"))
+
+
+def _strand_envelope_radius(params: BraidParams) -> float:
+    """Outermost radial reach of the braided sleeve (centerline to strand peak)."""
+    return params.Rr + params.A + params.radial_extent
+
+
+def _params_from_config(config: Any, *, base_face_type: str = "braid_core") -> BraidParams:
     raw = getattr(config.tube_settings, "braided_rope", None) or {}
     kwargs: Dict[str, Any] = {
         k: v for k, v in raw.items() if k in _PARAM_KEYS and v is not None
     }
+    tube_r = float(config.tube_settings.outer_radius)
     if "outer_radius" not in kwargs:
-        kwargs["outer_radius"] = float(config.tube_settings.outer_radius)
+        kwargs["outer_radius"] = tube_r
+
+    if base_face_type != "braid_core":
+        # Swept bases (led_circle_tube, solid_circle, …) already occupy the
+        # tube OD.  Strands must sit outside that surface or a later fuse
+        # absorbs them into the wall with no visible braid texture.
+        outer = float(kwargs["outer_radius"])
+        for _ in range(8):
+            probe = BraidParams(**{**kwargs, "outer_radius": outer})
+            if _strand_envelope_radius(probe) > tube_r + 1e-3:
+                return probe
+            outer = tube_r + probe.p + probe.radial_extent
+        kwargs["outer_radius"] = outer
+
     return BraidParams(**kwargs)
 
 
@@ -317,9 +349,13 @@ class BraidedRopeModel:
         config: Any,
         face_kwargs: Optional[Dict[str, Any]] = None,
     ):
-        del aux, face_kwargs  # braided rope drives its own twist; aux/face_kwargs ignored
-        params = _params_from_config(config)
+        base_face_type = _base_face_type(config)
+        params = _params_from_config(config, base_face_type=base_face_type)
         path_length = path.Length()
+        if base_face_type in ("braided_rope", "braided_rope_tube"):
+            raise ValueError(
+                f"braided_rope.base_face_type cannot be {base_face_type!r}"
+            )
 
         # Centerline frames: denser when the path is curved or long.
         num_frames = max(120, min(400, int(path_length / 1.0)))
@@ -336,13 +372,24 @@ class BraidedRopeModel:
         )
 
         logger.info(
-            "BraidedRopeModel: %s; path_length=%.1f mm, loft_samples=%d",
+            "BraidedRopeModel: %s; base_face_type=%s; path_length=%.1f mm, loft_samples=%d",
             params.summary(),
+            base_face_type,
             path_length,
             loft_samples,
         )
 
-        core = _build_core_tube(frames, params)
+        if base_face_type == "braid_core":
+            core = _build_core_tube(frames, params)
+        elif base_face_type in _SWEPT_BASE_FACE_TYPES:
+            core = SweptFaceModel(base_face_type).build(
+                path=path, aux=aux, config=config, face_kwargs=face_kwargs
+            )
+        else:
+            raise ValueError(
+                f"braided_rope.base_face_type must be 'braid_core' or one of "
+                f"{sorted(_SWEPT_BASE_FACE_TYPES)!r} (got {base_face_type!r})"
+            )
 
         total_strands = 2 * params.num_strands_per_dir
         strands: List[Solid] = []

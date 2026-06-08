@@ -27,10 +27,13 @@ def scale_pyknot_points(
         width: Target width for the x dimension (mm)
         height: Target height for the y dimension (mm)
         length: Target length for the z dimension (mm)
-        padding: Optional padding to subtract from (width, height, length).
-                 If a single float, the same padding is applied to all three
-                 dimensions. If a tuple of three numbers, interpreted as
-                 (width_padding, height_padding, length_padding).
+        padding: Per-side clearance (mm) reserved for the swept tube profile.
+                 Subtracted from both sides of each axis before scaling, so the
+                 path centerline fits in (width - 2*pad_w) x (height - 2*pad_h)
+                 x (length - 2*pad_l). If a single float, the same padding is
+                 applied on every side of all three dimensions. If a tuple of
+                 three numbers, interpreted as (width_padding, height_padding,
+                 length_padding) per side.
         preserve_aspect_ratio: When True (default), uses a uniform scale factor
             so the knot preserves its proportions. When False, scales each axis
             independently to fill the (padded) bounding box.
@@ -51,9 +54,9 @@ def scale_pyknot_points(
     else:
         pad_w = pad_h = pad_l = float(padding)
 
-    effective_width = width - pad_w
-    effective_height = height - pad_h
-    effective_length = length - pad_l
+    effective_width = width - 2 * pad_w
+    effective_height = height - 2 * pad_h
+    effective_length = length - 2 * pad_l
 
     scale_x = effective_width / span_x if span_x > 0 else 1.0
     scale_y = effective_height / span_y if span_y > 0 else 1.0

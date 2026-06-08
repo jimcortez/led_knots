@@ -178,7 +178,7 @@ Not currently called from any of the built-in knot modules — it exists for too
 
 ## Cookbook: add a new knot
 
-1. **Create the module.** Copy [src/led_knots/knots/trefoil.py](../src/led_knots/knots/trefoil.py) to `src/led_knots/knots/<your_knot>.py`. The trefoil template is the most canonical: load config, generate points, rescale, open the path, build the aux spine, draw. Note that all current modules execute at module load time — there is no `main()` function — so the body of the file runs when the module is imported.
+1. **Create the module.** Copy [src/led_knots/knots/trefoil.py](../src/led_knots/knots/trefoil.py) to `src/led_knots/knots/<your_knot>.py`. The trefoil template is the most canonical: expose `build(config)`, generate points, rescale, open the path, build the aux spine, call `draw_part`.
 2. **Generate the path.** Pick one of three sources:
    - **pyknotid** — `from pyknotid.make import some_knot; k = some_knot(num_points=150); pts = scale_pyknot_points(k.points, width=config.output_bounds.width, height=config.output_bounds.width, length=config.output_bounds.height, padding=config.tube_settings.outer_radius, preserve_aspect_ratio=False)`. Drop the last point: `path = spline(pts[:-1])`.
    - **Analytic numpy** — build a list of `(x, y, z)` tuples in millimetres directly. Anchor coordinates to `config.output_bounds.{width, height}` rather than literals so the part respects the configured build volume. See [sine_wave.py](../src/led_knots/knots/sine_wave.py).
@@ -195,21 +195,25 @@ Not currently called from any of the built-in knot modules — it exists for too
    ```
 
    Wrap it in `try/except ValueError` if you want to fall back to a no-aux sweep with a clear message, or just let the error propagate so the user knows the bend is infeasible.
-4. **Render the part.**
+4. **Render inside `build(config)`.**
 
    ```python
-   draw_part(path, config, aux=aux_spine, rotation_z=initial_rotation)
+   def build(config: Config) -> None:
+       # ... build path and optional aux_spine ...
+       draw_part(path, config, aux=aux_spine, rotation_z=initial_rotation)
    ```
 
-   `draw_part` reads the same CLI flags every other knot does (see the [CLI reference](cli-reference.md)) — `--preview`, `--export`, slicing, etc. Omit `aux` and `rotation_z` for paths without a custom twist schedule.
-5. **Register a console script.** Add an entry under `[project.scripts]` in [pyproject.toml](../pyproject.toml):
+   Omit `aux` and `rotation_z` for paths without a custom twist schedule.
+5. **Add a config file.** Create a YAML under `knot_configs/` (or any path) with `knot_type` set to your module stem:
 
-   ```toml
-   led-knots-<your-knot> = "led_knots.knots.<your_knot>:main"
+   ```yaml
+   knot_type: my_knot
+   rendering:
+     name: my_knot
    ```
 
-   Caveat: most knot modules currently execute on import and do not actually define `main()`. The console-script entries in `pyproject.toml` follow this convention even though they reference a non-existent symbol; running the module with `python -m led_knots.knots.<your_knot>` is the actually-working pattern. If you want a real `main()`, wrap your module body in a function and call it from `if __name__ == "__main__":` — but do it consistently rather than mixing styles.
-6. **Validate.** Run with `--preview` to get a quick PNG and `--export` to write the model files. The [render pipeline guide](rendering-and-preview.md) lists the exact outputs.
+   No `pyproject.toml` entry is needed — knot modules are discovered by filename.
+6. **Validate.** Run `render-knot knot_configs/my_knot.yaml`. The render bundle includes a preview PNG and STL by default. See the [render pipeline guide](rendering-and-preview.md) for all export formats.
 
 ## Cookbook: tune an existing knot
 
@@ -244,4 +248,4 @@ Re-run the knot — `draw_part` looks up the model by name from the registry and
 - **Don't** feed a closed path straight to `spline()`. CadQuery will accept the duplicate endpoint and produce a wire whose two end faces overlap when swept — the sweep then fails or produces a degenerate solid. Drop the last point (`pts[:-1]`) the way [trefoil.py:42](../src/led_knots/knots/trefoil.py#L42) does, or trim more aggressively (`pts[:-10]`) when you want a visible physical gap.
 - **Don't** bypass `build_ribbon_aux_spine` for curved paths just to silence its `ValueError`. The exception is telling you the LED ribbon physically cannot follow the path; the fix is to lengthen the path, smooth the curvature, or relax `min_90_degree_twist_distance` — not to remove the guard.
 - **Don't** hardcode dimensions in a knot module. Pull `output_bounds.width`, `output_bounds.height`, and `tube_settings.outer_radius` from `config` so the same module respects whatever config the user loads. The one acceptable hardcode is `spine_offset_radius = 5.0`, which is a frame-construction detail that does not affect the final shape.
-- **Don't** rely on the per-knot `main()` convention from `pyproject.toml` — the modules execute at import, not via `main`. Use `python -m led_knots.knots.<name>` or refactor consistently. See the cookbook step 5 caveat.
+- **Don't** call `get_config()` or `draw_part()` at module import time. Expose a `build(config)` function and let `render-knot` dispatch to it via the file-based registry.

@@ -1,9 +1,10 @@
 # Screenshots
 
-Preview images for each knot type. Generate any preview with:
+Preview images for each knot type. Generate any preview with a config that sets
+`knot_type`:
 
 ```bash
-python -m led_knots.knots.<name> --preview assets/<name>.png
+render-knot knot_configs/<name>.yaml
 ```
 
 Or regenerate all previews (and the combined GIF) with:
@@ -30,9 +31,7 @@ Straight vertical pipe.
 ![Rod](../assets/rod.png)
 
 ```bash
-python -m led_knots.knots.rod --preview assets/rod.png
-# Export to STL:
-python -m led_knots.knots.rod --export rod.stl
+render-knot knot_configs/test_short_rod_led_tube.yaml
 ```
 
 ---
@@ -44,9 +43,7 @@ Simple circular ring.
 ![Ring](../assets/ring.png)
 
 ```bash
-python -m led_knots.knots.ring --preview assets/ring.png
-# Export to STL:
-python -m led_knots.knots.ring --export ring.stl
+render-knot knot_configs/ring.yaml
 ```
 
 ---
@@ -58,9 +55,7 @@ Helical spiral path.
 ![Helix](../assets/helix.png)
 
 ```bash
-python -m led_knots.knots.helix --preview assets/helix.png
-# Export to STL:
-python -m led_knots.knots.helix --export helix.stl
+render-knot knot_configs/helix.yaml
 ```
 
 ---
@@ -72,9 +67,7 @@ python -m led_knots.knots.helix --export helix.stl
 ![Quarter turn](../assets/quarter_turn.png)
 
 ```bash
-python -m led_knots.knots.quarter_turn --preview assets/quarter_turn.png
-# Export to STL:
-python -m led_knots.knots.quarter_turn --export quarter_turn.stl
+render-knot knot_configs/quarter_turn.yaml
 ```
 
 ---
@@ -86,9 +79,7 @@ python -m led_knots.knots.quarter_turn --export quarter_turn.stl
 ![Jog bend](../assets/jog_bend.png)
 
 ```bash
-python -m led_knots.knots.jog_bend --preview assets/jog_bend.png
-# Export to STL:
-python -m led_knots.knots.jog_bend --export jog_bend.stl
+render-knot knot_configs/jog_bend.yaml
 ```
 
 ---
@@ -100,7 +91,5 @@ Figure-8 / torus knot.
 ![Figure 8](../assets/figure_8.png)
 
 ```bash
-python -m led_knots.knots.figure_8 --preview assets/figure_8.png
-# Export to STL:
-python -m led_knots.knots.figure_8 --export figure_8.stl
+render-knot knot_configs/figure_8.yaml
 ```

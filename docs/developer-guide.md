@@ -32,9 +32,10 @@ Jupyter / ipympl / vispy for notebook-driven exploration; install those with
 `uv sync` if you want the notebook stack.
 
 `uv` materializes the venv at `.venv/` in the repo root. Activate it with
-`source .venv/bin/activate`, or prefix every command with `uv run`. The console
-scripts declared in [pyproject.toml](../pyproject.toml#L42) (`led-knots-rod`,
-`led-knots-trefoil`, etc.) only resolve once the editable install is in place.
+`source .venv/bin/activate`, or prefix every command with `uv run`. The
+`render-knot` and `render-part` console scripts declared in
+[pyproject.toml](../pyproject.toml#L42) resolve once the editable install is in
+place.
 
 ### macOS VTK dylib gotcha
 
@@ -56,30 +57,19 @@ and reinstalls `cadquery-vtk` so its own copy stays canonical.
 These patterns are load-bearing. Match them when you add new code; deviating
 will work in isolation but break tooling that walks the tree.
 
-### Knot modules execute geometry at import time
+### Knot and part modules expose `build(config)`
 
-Every file under [src/led_knots/knots/](../src/led_knots/knots/) builds its
-solid as **top-level module code**, not inside a `main()` function. CLI flag
-parsing happens inside `get_config()` and `draw_part()`, which the module calls
-during import. This means:
+Every file under [src/led_knots/knots/](../src/led_knots/knots/) and
+[src/led_knots/parts/](../src/led_knots/parts/) exposes a `build(config: Config)
+-> None` entry point. The CLI loads a YAML config (with `knot_type` or
+`part_type`), merges it with repo defaults, and dispatches via the file-based
+registry in `knots/registry.py` or `parts/registry.py`.
 
-- `import led_knots.knots.trefoil` is a *side-effect* that runs the entire
-  pipeline: parse args, build path, sweep tube, export / preview / serve.
-- The canonical invocation is `python -m led_knots.knots.<name>`. That form
-  simply runs the module — it does not require a `main()` symbol.
-- Any preview-generation or test runner that imports the module pays the full
-  build cost. Don't add expensive work at import-time that isn't geometry.
-- Do not refactor existing knots to defer work into a function; the rendering
-  pipeline relies on the module-level objects.
-
-> **Known limitation — `led-knots-*` console scripts.**
-> [pyproject.toml](../pyproject.toml#L42) declares ten `led-knots-*` entry
-> points of the form `"led_knots.knots.<name>:main"`, but no knot module
-> currently defines `main`. The console-script wrapper still triggers the
-> module's import-time side effects (so `--export` writes the file), but it
-> then raises `ImportError: cannot import name 'main' …` at the very end.
-> Prefer `python -m led_knots.knots.<name>` until each knot module grows a
-> `main()` (a trivial one-liner that re-imports or no-ops would suffice).
+- Importing a knot module does **not** run geometry — only `build(config)` does.
+- The canonical invocation is `render-knot knot_configs/my_knot.yaml` or
+  `render-part part_configs/my_part.yaml`.
+- Adding a new model = add `<name>.py` with `build(config)` + set
+  `knot_type` / `part_type` in YAML. No `pyproject.toml` entry per model.
 
 ### `TubeModel`s register via side-effects in `tube_models/__init__.py`
 
@@ -91,14 +81,13 @@ dict or by calling `register_tube_model(...)`). `get_tube_model(face_type)`
 is the only correct lookup path; do not import individual model classes from
 callers.
 
-### Config flows through `get_config()`
+### Config flows through `load_config()`
 
-Use `from led_knots.core.config import get_config` and treat the returned
-object as read-only. Do not call `yaml.safe_load("config.yaml")` yourself.
-`get_config()` is responsible for layering `config.local.yaml` on top of
-`config.yaml`, freezing the result, and caching it for the lifetime of the
-process. Re-reading bypasses local overrides and invalidates the cache
-assumption.
+Use `from led_knots.core.config import load_config` with
+`parse_render_args()` and treat the returned object as read-only. Do not call
+`yaml.safe_load("config.yaml")` yourself. `load_config()` layers
+`config.local.yaml`, the user config file, and CLI overrides on top of
+`config.yaml`.
 
 ### Use the helpers in `src/led_knots/core/`
 
@@ -133,10 +122,10 @@ repo root). If you need a per-run scratch directory, create one under
 
 | You want to add...               | Put the code in...                                                                          | Then update...                                                                                                |
 | -------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| A new knot                       | [src/led_knots/knots/<name>.py](../src/led_knots/knots/)                                    | `[project.scripts]` in [pyproject.toml](../pyproject.toml#L42) with a `led-knots-<name>` console_script entry |
+| A new knot                       | [src/led_knots/knots/<name>.py](../src/led_knots/knots/) with `build(config)`              | A config YAML with `knot_type: <name>` under `knot_configs/`                                                  |
 | A new cross-section face         | [src/led_knots/core/led_circle.py](../src/led_knots/core/led_circle.py)                     | [src/led_knots/core/tube_models/__init__.py](../src/led_knots/core/tube_models/__init__.py#L17) registry      |
 | A new `TubeModel`                | [src/led_knots/core/tube_models/<your>.py](../src/led_knots/core/tube_models/)              | [src/led_knots/core/tube_models/__init__.py](../src/led_knots/core/tube_models/__init__.py#L17) registry      |
-| A new auxiliary part             | [src/led_knots/parts/](../src/led_knots/parts/)                                             | Consumer code (knots, render pipeline) that wants to embed it                                                 |
+| A new auxiliary part             | [src/led_knots/parts/<name>.py](../src/led_knots/parts/) with `build(config)`               | A config YAML with `part_type: <name>` under `part_configs/`                                                  |
 | A new optimization heuristic     | [src/led_knots/optimize/](../src/led_knots/optimize/)                                       | [src/led_knots/optimize/settings.py](../src/led_knots/optimize/settings.py) if it needs a knob                |
 
 Match the file naming used by neighbors: snake_case modules, one knot or one
@@ -176,7 +165,7 @@ start a new knot.
   `config.tube_settings`. If a knot reads its own magic number you get a
   model that ignores `config.local.yaml` and silently desynchronises from
   the rest of the suite.
-- **Don't mutate the global config object** returned by `get_config()`.
+- **Don't mutate the `Config` object** returned by `load_config()`.
   Treat it as frozen. If you need a one-off variant, copy the field into a
   local before mutating.
 - **Don't bypass `build_ribbon_aux_spine`.** If it raises `ValueError`

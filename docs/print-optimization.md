@@ -22,13 +22,13 @@ Typical usage:
 
 ```bash
 # Step 1: read-only inspection on a new part.
-python -m led_knots.knots.trefoil --optimize --optimize-report-dir reports/trefoil
+render-knot knot_configs/my_trefoil.yaml --optimize --optimize-report-dir reports/trefoil
 
 # Step 2: once the report looks sane, let the optimizer pick + apply orientation.
-python -m led_knots.knots.trefoil --auto-orient --optimize-report-dir reports/trefoil
+render-knot knot_configs/my_trefoil.yaml --auto-orient --optimize-report-dir reports/trefoil
 
 # Step 3 (optional): enable drain holes in config.yaml first, then re-run.
-python -m led_knots.knots.trefoil --auto-orient
+render-knot knot_configs/my_trefoil.yaml --auto-orient
 ```
 
 `--optimize` and `--no-optimize` are mutually exclusive. When none of the three flags are passed, the stage uses whatever `print_optimization.enabled` is set to in [config.yaml:158](../config.yaml#L158) (default: `false`).

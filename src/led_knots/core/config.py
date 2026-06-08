@@ -2,7 +2,7 @@
 Configuration management for LED knots.
 
 Reads configuration from config.yaml, optionally overrides with config.local.yaml,
-and supports a --config CLI overlay merged on top of both.
+and merges the config file passed to render-knot / render-part on top of both.
 Provides an object-oriented interface to configuration values.
 """
 
@@ -10,15 +10,16 @@ import logging
 import os
 import yaml
 from pathlib import Path
-from typing import Any, Dict, Optional
-from .utils import parse_args
+from typing import Any, Dict, List, Optional
+from .utils import parse_render_args
 from led_knots.optimize.settings import PrintOptimizationSettings
+from .cache_utils import render_bundle_stem
 
 logger = logging.getLogger(__name__)
 
 
 def _resolve_config_path(project_root: Path, path_str: str) -> Path:
-    """Resolve a --config path: absolute as-is, relative against project root."""
+    """Resolve a config file path: absolute as-is, relative against project root."""
     p = Path(path_str)
     return p if p.is_absolute() else project_root / p
 
@@ -31,6 +32,7 @@ VALID_FACE_TYPES = (
     'square',
     'pyramid_studded',
     'braided_rope',
+    'braided_rope_tube',
 )
 
 
@@ -397,6 +399,10 @@ class ViewerSettings:
         self.remote_upload_timeout = float(ut) if ut is not None else 300.0
         pt = rem.get('post_timeout')
         self.remote_post_timeout = float(pt) if pt is not None else 60.0
+        self.tessellation_tolerance = float(d.get('tessellation_tolerance', 0.05))
+        self.tessellation_angular_tolerance = float(
+            d.get('tessellation_angular_tolerance', 0.1)
+        )
 
 
 class ServerSettings:
@@ -427,109 +433,285 @@ class ServerSettings:
                 os.environ[env_name] = str(val)
 
 
-class ExportSettings:
-    """Export settings configuration."""
-    
-    def __init__(self, data: Dict[str, Any], filepath: Optional[str] = None):
-        self.filepath = filepath  # From command line argument
-        self.tolerance = float(data.get('tolerance', 0.00005))
-        self.angular_tolerance = float(data.get('angular_tolerance', 0.05))
-        self.stl_ascii = bool(data.get('stl_ascii', True))  # True = ASCII (e.g. GitHub), False = binary
+DEFAULT_FILENAME_TEMPLATES: Dict[str, str] = {
+    "stl": "{name}.stl",
+    "step": "{name}.step",
+    "3mf": "{name}.3mf",
+    "glb": "{name}.glb",
+    "gltf": "{name}.gltf",
+    "obj": "{name}.obj",
+    "preview": "{name}.png",
+    "config": "{name}.yaml",
+    "stats": "{name}.csv",
+}
+
+VALID_EXPORT_FORMATS = frozenset(DEFAULT_FILENAME_TEMPLATES.keys())
+
+_RESERVED_EXPORT_KEYS = frozenset({"format", "enabled", "filename"})
 
 
-class PreviewSettings:
-    """Preview image settings (mesh to image; fine tessellation for smooth tubes)."""
+def resolve_filename_template(
+    template: str,
+    *,
+    bundle_stem: str,
+    run_name: str,
+) -> str:
+    return (
+        template.replace("{name}", bundle_stem)
+        .replace("{run_name}", run_name)
+    )
+
+
+def _parse_color(spec: Any) -> tuple:
+    import matplotlib.colors as mcolors
+    if isinstance(spec, (list, tuple)) and len(spec) >= 3:
+        return (float(spec[0]), float(spec[1]), float(spec[2]))
+    s = str(spec).strip()
+    rgb = mcolors.to_rgb(s)
+    return (float(rgb[0]), float(rgb[1]), float(rgb[2]))
+
+
+def _merge_exports_by_filename(
+    base: List[Dict[str, Any]],
+    override: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    if not override:
+        return list(base)
+    indexed: Dict[str, Dict[str, Any]] = {}
+    order: List[str] = []
+    for entry in base:
+        job = dict(entry)
+        fmt = str(job.get("format", ""))
+        key = str(job.get("filename") or DEFAULT_FILENAME_TEMPLATES.get(fmt, "{name}.dat"))
+        indexed[key] = job
+        order.append(key)
+    for entry in override:
+        job = dict(entry)
+        fmt = str(job.get("format", ""))
+        key = str(job.get("filename") or DEFAULT_FILENAME_TEMPLATES.get(fmt, "{name}.dat"))
+        if key in indexed:
+            indexed[key] = Config._merge_dicts(indexed[key], job)
+        else:
+            indexed[key] = job
+            order.append(key)
+    return [indexed[k] for k in order]
+
+
+class RenderingExportJob:
+    """One entry in rendering.exports."""
 
     def __init__(self, data: Dict[str, Any], project_root: Path):
-        stl_cache = str(data.get('stl_cache', 'cache/preview'))
-        self.preview_cache_dir = project_root / stl_cache
-        # Tessellation for preview mesh (smaller = smoother)
-        self.mesh_tolerance = float(data.get('mesh_tolerance', 0.0005))
-        self.mesh_angular_tolerance = float(data.get('mesh_angular_tolerance', 0.04))
-        self.image_width = int(data.get('image_width', 800))
-        self.image_height = int(data.get('image_height', 600))
-        self.dpi = int(data.get('dpi', 100))
-        self.elevation = float(data.get('elevation', 30))
-        self.azimuth = float(data.get('azimuth', 45))
-        self.roll = float(data.get('roll', 0))
-        self.light_azimuth = float(data.get('light_azimuth', 225))
-        self.light_elevation = float(data.get('light_elevation', 45))
-        self.opacity = float(data.get('opacity', 1.0))
-        self.opacity = max(0.0, min(1.0, self.opacity))
-        color_spec = data.get('color', '#b3b3b3')
-        self._color_rgb = self._parse_color(color_spec)
-        background_spec = data.get('background', '#ffffff')
-        self._background_rgb = self._parse_color(background_spec)
+        self.format = str(data.get("format", "")).strip().lower()
+        if self.format not in VALID_EXPORT_FORMATS:
+            raise ValueError(
+                f"rendering.exports format must be one of {sorted(VALID_EXPORT_FORMATS)!r} "
+                f"(got {self.format!r})"
+            )
+        self.enabled = bool(data.get("enabled", True))
+        self.filename_template = str(
+            data.get("filename") or DEFAULT_FILENAME_TEMPLATES[self.format]
+        )
+        self.match_key = self.filename_template
+        self.settings = {
+            k: v for k, v in data.items() if k not in _RESERVED_EXPORT_KEYS
+        }
+        self._project_root = project_root
+        self._init_format_attrs(data)
 
-    @staticmethod
-    def _parse_color(spec: Any) -> tuple:
-        """Parse color from hex string (e.g. '#b3b3b3') or name; return (r, g, b) in [0, 1]."""
-        import matplotlib.colors as mcolors
-        if isinstance(spec, (list, tuple)) and len(spec) >= 3:
-            return (float(spec[0]), float(spec[1]), float(spec[2]))
-        s = str(spec).strip()
-        rgb = mcolors.to_rgb(s)
-        return (float(rgb[0]), float(rgb[1]), float(rgb[2]))
+    def _init_format_attrs(self, data: Dict[str, Any]) -> None:
+        if self.format == "stl":
+            self.stl_ascii = bool(data.get("stl_ascii", True))
+        elif self.format == "preview":
+            stl_cache = str(data.get("stl_cache", "cache/preview"))
+            self.preview_cache_dir = self._project_root / stl_cache
+            self.mesh_tolerance = float(data.get("mesh_tolerance", 0.0005))
+            self.mesh_angular_tolerance = float(data.get("mesh_angular_tolerance", 0.04))
+            self.image_width = int(data.get("image_width", 800))
+            self.image_height = int(data.get("image_height", 600))
+            self.dpi = int(data.get("dpi", 100))
+            self.elevation = float(data.get("elevation", 30))
+            self.azimuth = float(data.get("azimuth", 45))
+            self.roll = float(data.get("roll", 0))
+            self.light_azimuth = float(data.get("light_azimuth", 225))
+            self.light_elevation = float(data.get("light_elevation", 45))
+            self.opacity = max(0.0, min(1.0, float(data.get("opacity", 1.0))))
+            self._color_rgb = _parse_color(data.get("color", "#b3b3b3"))
+            self._background_rgb = _parse_color(data.get("background", "#ffffff"))
+        elif self.format == "obj":
+            self.unit_scale_mm_to_m = bool(data.get("unit_scale_mm_to_m", True))
+            tfc = data.get("target_face_count")
+            self.target_face_count = int(tfc) if tfc is not None else None
+            self.watertight_required = bool(data.get("watertight_required", False))
 
 
-class MeshSettings:
-    """Mesh export configuration for simulation-focused OBJ output."""
+class RenderingSettings:
+    """Render bundle output directory, shared tolerances, and export jobs."""
 
-    def __init__(self, data: Dict[str, Any], filepath: Optional[str] = None):
-        # Target output mesh path from the command line (--output-mesh).
-        self.filepath: Optional[str] = filepath
+    def __init__(
+        self,
+        data: Dict[str, Any],
+        project_root: Path,
+        *,
+        model_name: Optional[str],
+        cli_name: Optional[str],
+        disabled_formats: Optional[set] = None,
+    ):
+        self.output_dir = str(data.get("output_dir", "renders"))
+        yaml_name = data.get("name")
+        self._yaml_name = yaml_name
+        self._model_name = model_name
+        self._cli_name = cli_name
+        self.tolerance = float(data.get("tolerance", 0.0001))
+        self.angular_tolerance = float(data.get("angular_tolerance", 0.05))
+        self._disabled_formats = {f.strip().lower() for f in (disabled_formats or set()) if f.strip()}
+        raw_exports = data.get("exports")
+        if raw_exports is None:
+            raw_exports = _default_exports_list()
+        self.exports: List[RenderingExportJob] = [
+            RenderingExportJob(entry, project_root)
+            for entry in raw_exports
+        ]
+        for job in self.exports:
+            if job.format == "preview":
+                job.preview_cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Unit scaling: when true, convert from millimeters (CadQuery default)
-        # to meters (used by Genesis and many physics engines).
-        self.unit_scale_mm_to_m: bool = bool(data.get("unit_scale_mm_to_m", True))
+    def resolve_run_name(self) -> str:
+        if self._cli_name:
+            return self._cli_name
+        if self._yaml_name not in (None, ""):
+            return str(self._yaml_name)
+        if self._model_name:
+            return self._model_name
+        return "knot"
 
-        # Optional decimation target: maximum number of faces to aim for.
-        # When None, no automatic decimation is performed.
-        tfc = data.get("target_face_count", None)
-        self.target_face_count: Optional[int] = int(tfc) if tfc is not None else None
+    def enabled_jobs(self) -> List[RenderingExportJob]:
+        jobs = []
+        for job in self.exports:
+            if not job.enabled:
+                continue
+            if job.format in self._disabled_formats:
+                continue
+            jobs.append(job)
+        return jobs
 
-        # Require watertight meshes for export. If true and the generated mesh
-        # is not watertight, mesh export will fail with a clear error.
-        self.watertight_required: bool = bool(data.get("watertight_required", True))
+    def preview_jobs(self) -> List[RenderingExportJob]:
+        return [j for j in self.exports if j.format == "preview" and j.enabled and j.format not in self._disabled_formats]
+
+    def job_by_filename_template(self, key: str) -> Optional[RenderingExportJob]:
+        for job in self.exports:
+            if job.match_key == key:
+                return job
+        return None
+
+    def first_preview_job(self) -> Optional[RenderingExportJob]:
+        previews = self.preview_jobs()
+        return previews[0] if previews else None
+
+
+def _default_exports_list() -> List[Dict[str, Any]]:
+    return [
+        {"format": "stl", "enabled": True, "filename": "{name}.stl", "stl_ascii": True},
+        {
+            "format": "preview",
+            "enabled": True,
+            "filename": "{name}.png",
+            "stl_cache": "cache/preview",
+            "mesh_tolerance": 0.0005,
+            "mesh_angular_tolerance": 0.04,
+            "image_width": 800,
+            "image_height": 600,
+            "dpi": 100,
+            "elevation": 30,
+            "azimuth": 45,
+            "roll": 0,
+            "light_azimuth": 225,
+            "light_elevation": 45,
+            "color": "#b3b3b3",
+            "opacity": 1.0,
+            "background": "#1a1a2e",
+        },
+        {"format": "glb", "enabled": True, "filename": "{name}.glb"},
+        {"format": "config", "enabled": True, "filename": "{name}.yaml"},
+        {"format": "stats", "enabled": True, "filename": "{name}.csv"},
+        {"format": "step", "enabled": False, "filename": "{name}.step"},
+        {"format": "gltf", "enabled": False, "filename": "{name}.gltf"},
+        {"format": "3mf", "enabled": False, "filename": "{name}.3mf"},
+        {
+            "format": "obj",
+            "enabled": False,
+            "filename": "{name}.obj",
+            "unit_scale_mm_to_m": True,
+            "target_face_count": None,
+            "watertight_required": False,
+        },
+    ]
 
 
 class Config:
     """Main configuration object."""
     
-    def __init__(self, description: Optional[str] = None, name: Optional[str] = None):
+    def __init__(
+        self,
+        *,
+        args=None,
+        description: Optional[str] = None,
+    ):
         # Find the project root (where config.yaml is located)
         # This file is in src/led_knots/core/, so we go up 3 levels
         current_file = Path(__file__)
         project_root = current_file.parent.parent.parent.parent
-        
-        config_path = project_root / 'config.yaml'
+
+        base_config_path = project_root / 'config.yaml'
         local_config_path = project_root / 'config.local.yaml'
-        
+        self.config_base_path = base_config_path
+        self.config_local_path = local_config_path
+
         # Load base configuration
-        with open(config_path, 'r') as f:
+        with open(base_config_path, 'r') as f:
             config_data = yaml.safe_load(f) or {}
-        
+
         # Load local overrides if they exist
         if local_config_path.exists():
             with open(local_config_path, 'r') as f:
                 local_data = yaml.safe_load(f) or {}
-                # Merge local overrides into base config
                 config_data = self._merge_dicts(config_data, local_data)
 
-        # Parse command line arguments (overlay must merge before settings init)
-        args = parse_args(description=description or "Create and render a knot model")
+        if args is None:
+            args = parse_render_args(description=description or "Render a model from a config file")
 
-        self.config_overlay_path: Optional[Path] = None
-        if args.config:
-            overlay_path = _resolve_config_path(project_root, args.config)
-            if not overlay_path.exists():
-                raise FileNotFoundError(f"Config overlay not found: {overlay_path}")
-            with open(overlay_path, 'r') as f:
+        self.config_path: Optional[Path] = None
+        user_config = getattr(args, "config", None)
+        if user_config:
+            resolved_path = _resolve_config_path(project_root, user_config)
+            if not resolved_path.exists():
+                raise FileNotFoundError(f"Config file not found: {resolved_path}")
+            with open(resolved_path, 'r') as f:
                 overlay_data = yaml.safe_load(f) or {}
             config_data = self._merge_dicts(config_data, overlay_data)
-            self.config_overlay_path = overlay_path
+            self.config_path = resolved_path
+
+        disabled_formats = set()
+        if getattr(args, "disable_export", None):
+            disabled_formats = {
+                f.strip().lower()
+                for f in str(args.disable_export).split(",")
+                if f.strip()
+            }
+        if getattr(args, "renders_dir", None):
+            rendering_block = dict(config_data.get("rendering") or {})
+            rendering_block["output_dir"] = args.renders_dir
+            config_data["rendering"] = rendering_block
+        if getattr(args, "name", None):
+            rendering_block = dict(config_data.get("rendering") or {})
+            rendering_block["name"] = args.name
+            config_data["rendering"] = rendering_block
         
-        # Initialize configuration sections
+        self._config_data = config_data
+        knot_type = config_data.get("knot_type")
+        part_type = config_data.get("part_type")
+        self.knot_type = str(knot_type).strip() if knot_type not in (None, "") else None
+        self.part_type = str(part_type).strip() if part_type not in (None, "") else None
+        model_name = self.knot_type or self.part_type
         self.output_bounds = OutputBounds(config_data.get('output_bounds', {}))
         face_type = str(config_data.get('face_type', 'led_circle'))
         if face_type not in VALID_FACE_TYPES:
@@ -548,27 +730,26 @@ class Config:
         # Server settings (viewer + optional CADQUERY_WEB_VIEWER_* styling)
         server_data = config_data.get('server', {})
         self.server_settings = ServerSettings(server_data, project_root)
-        
-        # Initialize export settings with command line filepath
-        self.export = ExportSettings(config_data.get('export', {}), filepath=args.export)
 
-        # Mesh export settings (simulation-focused OBJ output).
-        self.mesh = MeshSettings(config_data.get("mesh", {}), filepath=getattr(args, "output_mesh", None))
+        rendering_data = config_data.get("rendering") or {}
+        if not rendering_data.get("exports"):
+            rendering_data = {**rendering_data, "exports": _default_exports_list()}
+        self.rendering = RenderingSettings(
+            rendering_data,
+            project_root,
+            model_name=model_name,
+            cli_name=getattr(args, "name", None),
+            disabled_formats=disabled_formats,
+        )
+        self.run_name = self.rendering.resolve_run_name()
+        self.name = self.run_name
+        self.render_bundle_stem = render_bundle_stem(self.run_name)
+        self.render_bundle_dir = Path.cwd() / self.rendering.output_dir / self.render_bundle_stem
+        self.render_stats = None
 
-        # Preview settings (STL cache dir, image size, view angles)
-        preview_data = config_data.get('preview', {})
-        self.preview_settings = PreviewSettings(preview_data, project_root)
-        self.preview_settings.preview_cache_dir.mkdir(parents=True, exist_ok=True)
-        logger.debug("Preview cache directory: %s", self.preview_settings.preview_cache_dir)
-        
         # Store other command line arguments as properties
         self.server = args.server
         self._init_viewer_from_args(args)
-        self.preview_filepath = args.preview
-        # Optional multi-part export (e.g., assembly vs individual parts)
-        self.export_parts = getattr(args, "export_parts", None)
-        self.export_parts_dir = getattr(args, "export_parts_dir", None)
-        self.name = name  # Name of the part (used for export/display)
 
         # CLI overrides for the print-optimization stage. --auto-orient
         # implies enabling the optimizer; --optimize / --no-optimize set
@@ -647,7 +828,21 @@ class Config:
         """Recursively merge override dict into base dict."""
         result = base.copy()
         for key, value in override.items():
-            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            if key == "rendering" and isinstance(value, dict):
+                base_rendering = result.get("rendering", {})
+                if not isinstance(base_rendering, dict):
+                    base_rendering = {}
+                merged = dict(base_rendering)
+                for rk, rv in value.items():
+                    if rk == "exports" and isinstance(rv, list):
+                        base_exports = base_rendering.get("exports") or []
+                        merged["exports"] = _merge_exports_by_filename(base_exports, rv)
+                    elif isinstance(rv, dict) and isinstance(merged.get(rk), dict):
+                        merged[rk] = Config._merge_dicts(merged[rk], rv)
+                    else:
+                        merged[rk] = rv
+                result["rendering"] = merged
+            elif key in result and isinstance(result[key], dict) and isinstance(value, dict):
                 result[key] = Config._merge_dicts(result[key], value)
             else:
                 result[key] = value
@@ -658,27 +853,39 @@ class Config:
 _config_instance: Config = None
 
 
+def load_config(
+    *,
+    args=None,
+    description: Optional[str] = None,
+    set_env_vars: bool = True,
+) -> Config:
+    """
+    Load configuration from defaults, optional local overrides, and a user config file.
+
+    Args:
+        args: Pre-parsed CLI namespace from ``parse_render_args``. When omitted, parses ``sys.argv``.
+        description: Parser description when ``args`` is not provided.
+        set_env_vars: If True (default), set CADQUERY_WEB_VIEWER_* environment variables from
+                      server config before ``cadquery_web_viewer`` is imported.
+
+    Returns:
+        Config instance with merged YAML and CLI overrides applied.
+    """
+    config = Config(args=args, description=description)
+    if set_env_vars:
+        config.server_settings.apply_to_env()
+    return config
+
+
 def get_config(
     description: Optional[str] = None,
     name: Optional[str] = None,
     set_env_vars: bool = True,
 ) -> Config:
-    """
-    Get the global configuration instance.
-    
-    Args:
-        description: Optional description for the argument parser. 
-                     If provided, will be used when parsing command line arguments.
-        name: Optional name of the part (used for export/display).
-        set_env_vars: If True (default), set CADQUERY_WEB_VIEWER_* environment variables from
-                      server config before ``cadquery_web_viewer`` is imported.
-    
-    Returns:
-        Config: The global configuration instance with parsed command line arguments.
-    """
+    """Deprecated: use ``load_config`` instead."""
     global _config_instance
     if _config_instance is None:
-        _config_instance = Config(description=description, name=name)
-    if set_env_vars:
+        _config_instance = load_config(description=description, set_env_vars=set_env_vars)
+    elif set_env_vars:
         _config_instance.server_settings.apply_to_env()
     return _config_instance

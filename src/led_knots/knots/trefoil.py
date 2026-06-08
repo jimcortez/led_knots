@@ -15,41 +15,33 @@ from pyknotid.make import trefoil as make_trefoil
 
 from led_knots.core import (
     draw_part,
-    get_config,
     build_ribbon_aux_spine,
     scale_pyknot_points,
 )
+from led_knots.core.config import Config
 
 logger = logging.getLogger(__name__)
 
-config = get_config(name="Trefoil Knot", description="Create and render a trefoil knot")
 
-spine_offset_radius = 5.0
+def build(config: Config) -> None:
+    spine_offset_radius = 5.0
 
-# Generate the trefoil knot path using pyknotid, scaled to config output bounds.
-# More points give a smoother path; 150 balances smoothness and build time.
-k = make_trefoil(num_points=150)
-knot_points = scale_pyknot_points(
-    k.points,
-    width=config.output_bounds.width,
-    height=config.output_bounds.width,
-    length=config.output_bounds.height,
-    padding=config.tube_settings.outer_radius,
-    preserve_aspect_ratio=False,
-)
+    k = make_trefoil(num_points=150)
+    knot_points = scale_pyknot_points(
+        k.points,
+        width=config.output_bounds.width,
+        height=config.output_bounds.height,
+        length=config.output_bounds.length,
+        padding=config.tube_settings.outer_radius,
+    )
 
-# Open path (closed path causes face overlap)
-path = spline(knot_points[:-1])
+    path = spline(knot_points[:-1])
 
-# Raises ValueError if twist cannot be achieved within min_90_degree_twist_distance.
-# Higher num_samples yields a smoother aux spine (150 balances smoothness and build time).
-aux_spine, initial_rotation = build_ribbon_aux_spine(
-    path,
-    config,
-    num_samples=150,
-    spine_offset_radius=spine_offset_radius,
-)
+    aux_spine, initial_rotation = build_ribbon_aux_spine(
+        path,
+        config,
+        num_samples=150,
+        spine_offset_radius=spine_offset_radius,
+    )
 
-# Create, sweep, and render (draw_part supports --preview for image output)
-draw_part(path, config, aux=aux_spine, rotation_z=initial_rotation)
-
+    draw_part(path, config, aux=aux_spine, rotation_z=initial_rotation)

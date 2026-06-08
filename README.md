@@ -45,47 +45,49 @@ pip install -e .
 
 ## Quick Start
 
-Each knot type can be run as a standalone script. Export to a file, or view in the built-in viewer.
+Knot and part geometry is selected from a YAML config file. Set `knot_type` or `part_type` to match a module name under `src/led_knots/knots/` or `src/led_knots/parts/`.
 
 ```bash
-# Export to STL (or .step, .3mf, .glb, .gltf)
-python -m led_knots.knots.trefoil --export trefoil.stl
-# or, if installed: led-knots-trefoil --export trefoil.stl
+# Build a rod knot and write a render bundle under renders/
+render-knot knot_configs/test_short_rod_led_tube.yaml
 
-# Build geometry headlessly (no browser unless viewer flags below)
-python -m led_knots.knots.trefoil
+# Render an accessory part
+render-part part_configs/hang_clamp.yaml
 
 # Browser preview: default config uses remote — start the viewer server first
 #   cadquery-web-viewer --host localhost --port 32323
-python -m led_knots.knots.trefoil --server
+render-knot knot_configs/test_short_rod_led_tube.yaml --server
 
 # In-process embedded viewer (opens a local tab)
-python -m led_knots.knots.trefoil --viewer embedded
+render-knot knot_configs/test_short_rod_led_tube.yaml --viewer embedded
 ```
 
-### Available commands
+### Available knot types (`knot_type` in config)
 
-| Command | Description |
+| `knot_type` | Description |
 |---------|-------------|
-| `led-knots-rod` | Straight vertical pipe |
-| `led-knots-ring` | Simple circular ring |
-| `led-knots-helix` | Helical spiral path |
-| `led-knots-sine-wave` | Sine wave oscillation path |
-| `led-knots-trefoil` | Mathematical trefoil knot |
-| `led-knots-figure-8` | Figure-8 / torus knot |
-| `led-knots-jog-bend` | 2D jog bend path |
-| `led-knots-jog-bend-3d` | 3D jog bend with orientation control |
-| `led-knots-quarter-turn` | 90-degree turn path |
-| `led-knots-twisted-rod` | Straight rod with 90-degree twist |
+| `rod` | Straight vertical pipe |
+| `ring` | Simple circular ring |
+| `helix` | Helical spiral path |
+| `sine_wave` | Sine wave oscillation path |
+| `trefoil` | Mathematical trefoil knot |
+| `figure_8` | Figure-8 / torus knot |
+| `jog_bend` | 2D jog bend path |
+| `jog_bend_3d` | 3D jog bend with orientation control |
+| `quarter_turn` | 90-degree turn path |
+| `twisted_rod` | Straight rod with 90-degree twist |
+
+Additional knot modules (`k4_1`, `k8_21`, `stevedore`) are discovered automatically — set `knot_type` to the module filename stem.
 
 ### Command line options
 
-All knot commands accept the same options:
+Both `render-knot` and `render-part` accept the same options:
 
 | Option | Description |
 |--------|-------------|
-| `--export FILEPATH` | Export the model to a file. Supported formats: `.stl`, `.step`, `.stp`, `.3mf`, `.glb`, `.gltf` |
-| `--output-mesh FILEPATH` | Export a simulation-focused mesh using trimesh. Currently only `.obj` is supported and is tuned for physics engines like Genesis (meters, watertightness, optional decimation). |
+| `--name NAME` | Run name for the render bundle folder and default filename templates |
+| `--renders-dir DIR` | Parent directory for render bundles (overrides `rendering.output_dir`) |
+| `--disable-export FORMATS` | Disable export jobs for comma-separated formats (`stl`, `obj`, `stats`, …) |
 | `--server` | Enable browser preview using `server.viewer` from `config.yaml` (legacy alias; prefer `--viewer`) |
 | `--viewer MODE` | `off`, `embedded`, `embedded-block`, or `remote` (overrides `server.viewer.mode` when set) |
 | `--optimize` / `--no-optimize` | Run the SLA print-optimization stage; reports overhang clusters, islands, and connector tagging on the built mesh. |
@@ -93,7 +95,10 @@ All knot commands accept the same options:
 | `--optimize-report-dir DIR` | Write annotated PNG diagnostics for the optimizer (top + bottom views, with overhangs in red and connectors in green) to DIR. Implies `--optimize`. |
 | `-v`, `--verbose` | Enable debug-level logging |
 
-When you omit `--export` and any viewer flag (`--server` / `--viewer` not enabling preview), the knot still builds geometry headlessly. Use `--server` or `--viewer …` to send the model to **cadquery-web-viewer** (remote server or embedded).
+When you run a knot without viewer flags, it still builds geometry and writes a
+render bundle (STL, preview PNG, GLB, config YAML, stats CSV by default). Use
+`--server` or `--viewer …` to send the model to **cadquery-web-viewer** after
+files are written.
 
 ## Configuration
 
@@ -104,7 +109,7 @@ LED Knots uses a centralized configuration system via `config.yaml` in the proje
 - **Face settings**: Per-face options keyed by face name: `outer_diameter` or `outer_width` (for square), `wall_thickness` (e.g. in led_circle), `rect_inner_x` / `rect_inner_y` (led_circle cavity, with comments referencing original strip values), oval/connector/diffusion options. Use `inherit_from` to inherit from another face and override keys.
 - **Path**: `min_90_degree_twist_distance` (mm) for twist rate limits along the path
 - **Server**: `server.viewer` (embedded vs remote) and optional styling keys mapped to `CADQUERY_WEB_VIEWER_*` environment variables (`protocol`, `texture`, `color_faces`, `color_edges`, `color_vertices`)
-- **Export settings**: Export tolerances for 3D file formats
+- **Rendering**: `rendering.exports` — per-format export jobs (STL, STEP, GLB, preview PNG, OBJ, …)
 
 ### Server and browser viewer
 
@@ -131,7 +136,7 @@ server:
       port: 32323
 ```
 
-- **viewer.mode `remote`**: Each knot run POSTs the model to `http://<remote.host>:<remote.port>`; run `cadquery-web-viewer` (or `python -m cadquery_web_viewer`) in another terminal first. The CLI exits immediately after upload when there is no `--output-mesh` or `--preview` follow-up (caching is handled by the viewer server).
+- **viewer.mode `remote`**: Each knot run POSTs the model to the viewer after writing the render bundle.
 - **viewer.mode `embedded`**: The viewer starts an in-process Flask server when you call `show()`; use `embedded-block` / `block_until_disconnect: true` for the “wait until you close the tab” workflow.
 - **Styling keys** at the `server` level set `CADQUERY_WEB_VIEWER_*` so defaults match your project without exporting shell variables by hand.
 
