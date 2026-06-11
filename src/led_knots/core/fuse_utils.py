@@ -10,7 +10,6 @@ disconnected lumps.
 
 from __future__ import annotations
 
-import heapq
 import logging
 import sys
 from typing import Union
@@ -38,20 +37,16 @@ def _solid_volume(solid) -> float:
     return (bb.xmax - bb.xmin) * (bb.ymax - bb.ymin) * (bb.zmax - bb.zmin)
 
 
-def _fuse_solids_balanced(solids: list, *, name: str):
+def _fuse_solids_map_reduce(solids: list, *, name: str):
     """
-    Fuse many solids by repeatedly unioning the two smallest remaining bodies.
+    Fuse many solids in map-reduce rounds: pair neighbors, then pair results.
 
-    Keeps boolean operands similar in size (O(n log n) mesh work) instead of
-    growing one accumulator through every input (O(n²) in the worst case).
+    Solids are sorted by ascending volume so smaller bodies merge together
+    first and the largest solid is fused last (carried forward when a round
+    has an odd count).
     """
-    n = len(solids)
-    heap: list[tuple[float, int, object]] = [
-        (_solid_volume(s), i, s) for i, s in enumerate(solids)
-    ]
-    heapq.heapify(heap)
-
-    tie = n
+    current = sorted(solids, key=_solid_volume)
+    n = len(current)
     bar = tqdm(
         total=n - 1,
         desc=f"Fusing solids for {name}",
@@ -59,17 +54,22 @@ def _fuse_solids_balanced(solids: list, *, name: str):
         disable=not sys.stderr.isatty(),
     )
     try:
-        while len(heap) > 1:
-            _, _, a = heapq.heappop(heap)
-            _, _, b = heapq.heappop(heap)
-            merged = fuse(a, b)
-            tie += 1
-            heapq.heappush(heap, (_solid_volume(merged), tie, merged))
-            bar.update(1)
+        while len(current) > 1:
+            nxt: list = []
+            i = 0
+            while i < len(current):
+                if i + 1 < len(current):
+                    nxt.append(clean(fuse(current[i], current[i + 1])))
+                    bar.update(1)
+                    i += 2
+                else:
+                    nxt.append(current[i])
+                    i += 1
+            current = nxt
     finally:
         bar.close()
 
-    return heap[0][2]
+    return current[0]
 
 
 def fuse_part_solids(part: _PartT, *, name: str = "part") -> _PartT:
@@ -100,7 +100,7 @@ def fuse_part_solids(part: _PartT, *, name: str = "part") -> _PartT:
         return solids[0] if n == 1 else part
 
     logger.info("Fusing %d solids into one body for %s...", n, name)
-    merged = clean(_fuse_solids_balanced(solids, name=name))
+    merged = _fuse_solids_map_reduce(solids, name=name)
 
     remaining = _solid_count(merged)
     logger.info(
@@ -109,11 +109,9 @@ def fuse_part_solids(part: _PartT, *, name: str = "part") -> _PartT:
         remaining,
     )
     if remaining > 1:
-        logger.warning(
-            "%s: %d physically separate lumps remain after fuse "
-            "(solids do not touch; STL will still tessellate as one file).",
-            name,
-            remaining,
+        raise RuntimeError(
+            f"{name}: {remaining} physically separate lumps remain after fuse "
+            "(solids do not touch)"
         )
 
     if wrapper is not None:

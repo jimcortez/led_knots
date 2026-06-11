@@ -21,7 +21,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 import cadquery as cq
-from cadquery import Vector, Wire, Plane, Edge
+from cadquery import Location, Plane, Vector, Wire, Edge
+from cadquery.func import circle, face, intersect, sweep
 from cadquery.occ_impl.shapes import Compound, Solid
 from tqdm.auto import tqdm
 
@@ -67,6 +68,7 @@ class BraidParams:
     samples_per_period: int = 20
     strand_start: float = 2.0
     strand_end_offset: float = 2.0
+    radial_offset: float = 0.0
 
     Rr: float = field(init=False)
     p: float = field(init=False)
@@ -125,12 +127,17 @@ class BraidParams:
 
     def summary(self) -> str:
         total_strands = 2 * self.num_strands_per_dir
+        offset_part = (
+            f", radial_offset={self.radial_offset:.3f}"
+            if abs(self.radial_offset) > 1e-6
+            else ""
+        )
         return (
             f"Braid params: total strands = {total_strands} "
             f"(F={self.float_length}), Rr={self.Rr:.3f}, "
             f"outer_R={self.outer_radius:.3f}, a={self.a:.3f}, p={self.p:.3f}, "
             f"A={self.A:.3f}, pitch={self.pitch:.2f}, "
-            f"core_radius={self.core_radius:.3f}"
+            f"core_radius={self.core_radius:.3f}{offset_part}"
         )
 
 
@@ -156,7 +163,11 @@ def _braiding_curve_point(s: float, frame: PathFrame, params: BraidParams, phase
     _, x_dir, y_dir = _frame_axes(frame)
     theta_s = direction * (s / params.pitch) * 2.0 * math.pi + phase
     omega_s = 2.0 * math.pi * params.N / params.pitch
-    r_mod = params.Rr + direction * params.A * math.sin(omega_s * s)
+    r_mod = (
+        params.Rr
+        + params.radial_offset
+        + direction * params.A * math.sin(omega_s * s)
+    )
     cos_t, sin_t = math.cos(theta_s), math.sin(theta_s)
     ox, oy, oz = frame.point.x, frame.point.y, frame.point.z
     return (
@@ -267,8 +278,8 @@ def _build_braid_strand(
             path_wire = Wire.assembleEdges([path_edge])
             profile = _lenticular_wire(pts[0], tangents[0], x_dirs[0], params, direction)
             return Solid.sweep(profile, [], path_wire, makeSolid=True, isFrenet=True), "sweep"
-    except (TimeoutError, Exception):
-        return None, "failed"
+    except (TimeoutError, Exception) as exc:
+        raise RuntimeError("failed to build braid strand") from exc
 
 
 def _build_core_tube(frames: List[PathFrame], params: BraidParams) -> Solid:
@@ -313,7 +324,76 @@ def _base_face_type(config: Any) -> str:
 
 def _strand_envelope_radius(params: BraidParams) -> float:
     """Outermost radial reach of the braided sleeve (centerline to strand peak)."""
-    return params.Rr + params.A + params.radial_extent
+    return params.Rr + params.radial_offset + params.A + params.radial_extent
+
+
+def _strand_valley_radius(params: BraidParams) -> float:
+    """Innermost radial reach of the braided sleeve (centerline to strand valley)."""
+    return params.Rr + params.radial_offset - params.A - params.radial_extent
+
+
+_DEFAULT_VALLEY_EMBED_DEPTH = 0.5
+_DEFAULT_BRAID_TIGHTNESS = 0.0
+
+
+def _validate_valley_embed_depth(
+    depth: float,
+    *,
+    tube_r: float,
+    wall_thickness: Optional[float],
+) -> None:
+    if depth < 0:
+        raise ValueError(f"valley_embed_depth ({depth}) must be >= 0")
+    if depth >= tube_r:
+        raise ValueError(
+            f"valley_embed_depth ({depth}) must be < outer_radius ({tube_r})"
+        )
+    if wall_thickness is not None and depth > wall_thickness:
+        raise ValueError(
+            f"valley_embed_depth ({depth}) must be <= wall_thickness "
+            f"({wall_thickness})"
+        )
+
+
+def _scale_outer_radius_for_tube(
+    kwargs: Dict[str, Any],
+    *,
+    tube_r: float,
+) -> None:
+    """
+    Size the braid envelope to the tube OD before applying valley embed.
+
+    Strands sized at ``outer_radius=tube_r`` but shifted outward only via
+    ``radial_offset`` orbit far from their cross-section, which deforms the
+    swept base during boolean fuse.  Bump ``outer_radius`` until the natural
+    envelope clears the tube, then apply a small offset for valley depth.
+    """
+    outer = float(kwargs["outer_radius"])
+    for _ in range(8):
+        probe = BraidParams(**{**kwargs, "outer_radius": outer})
+        if _strand_envelope_radius(probe) > tube_r + 1e-3:
+            kwargs["outer_radius"] = outer
+            return
+        outer = tube_r + probe.p + probe.radial_extent
+    kwargs["outer_radius"] = outer
+
+
+def _tube_arc_spacing(tube_r: float, num_strands_per_dir: int) -> float:
+    """Circumferential arc between same-direction strand centerlines at ``tube_r``."""
+    return math.pi * tube_r / num_strands_per_dir
+
+
+def _apply_braid_tightness(kwargs: Dict[str, Any], *, tightness: float) -> None:
+    """
+    Scale ``pack_factor`` toward a tighter sleeve without changing ``outer_radius``.
+
+    A full contact solve that also retargets ``outer_radius`` pulled strands off
+    the tube surface and left almost nothing after the tube-OD clip.
+    """
+    if tightness <= 0:
+        return
+    base_pack = float(kwargs.get("pack_factor", 0.7))
+    kwargs["pack_factor"] = min(base_pack * (1.0 + 0.6 * tightness), 1.15)
 
 
 def _params_from_config(config: Any, *, base_face_type: str = "braid_core") -> BraidParams:
@@ -322,22 +402,99 @@ def _params_from_config(config: Any, *, base_face_type: str = "braid_core") -> B
         k: v for k, v in raw.items() if k in _PARAM_KEYS and v is not None
     }
     tube_r = float(config.tube_settings.outer_radius)
+    user_set_outer = raw.get("outer_radius") is not None
     if "outer_radius" not in kwargs:
         kwargs["outer_radius"] = tube_r
 
     if base_face_type != "braid_core":
-        # Swept bases (led_circle_tube, solid_circle, …) already occupy the
-        # tube OD.  Strands must sit outside that surface or a later fuse
-        # absorbs them into the wall with no visible braid texture.
-        outer = float(kwargs["outer_radius"])
-        for _ in range(8):
-            probe = BraidParams(**{**kwargs, "outer_radius": outer})
-            if _strand_envelope_radius(probe) > tube_r + 1e-3:
-                return probe
-            outer = tube_r + probe.p + probe.radial_extent
-        kwargs["outer_radius"] = outer
+        valley_embed_depth = float(
+            raw.get("valley_embed_depth", _DEFAULT_VALLEY_EMBED_DEPTH)
+        )
+        wall_thickness = getattr(config.tube_settings, "wall_thickness", None)
+        _validate_valley_embed_depth(
+            valley_embed_depth,
+            tube_r=tube_r,
+            wall_thickness=float(wall_thickness) if wall_thickness is not None else None,
+        )
+        tightness = float(raw.get("braid_tightness", _DEFAULT_BRAID_TIGHTNESS))
+        _apply_braid_tightness(kwargs, tightness=tightness)
+        if not user_set_outer:
+            _scale_outer_radius_for_tube(kwargs, tube_r=tube_r)
+        params = BraidParams(**kwargs)
+        target_valley = tube_r - valley_embed_depth
+        offset = target_valley - _strand_valley_radius(params)
+        return BraidParams(**{**kwargs, "radial_offset": offset})
 
     return BraidParams(**kwargs)
+
+
+def _orient_profile_face(profile, path, *, rotation_z: float = 90.0):
+    profile_center_x = 0.5
+    profile_center_y = 0.0
+
+    def rotate_around_center(shape):
+        if rotation_z == 0:
+            return shape
+        return (
+            shape.moved(x=-profile_center_x, y=-profile_center_y)
+            .moved(rz=rotation_z)
+            .moved(x=profile_center_x, y=profile_center_y)
+        )
+
+    oriented = rotate_around_center(profile.moved(x=0.5))
+    face_plane = Plane(origin=path.startPoint(), normal=path.tangentAt(0))
+    return oriented.moved(Location(face_plane))
+
+
+def _swept_embed_clip_shell(
+    path,
+    aux,
+    config: Any,
+    *,
+    max_radius: float,
+    rotation_z: float = 90.0,
+):
+    """
+    Path-aligned volume: (tube_r - valley_embed_depth) <= r <= max_radius.
+
+    Clips below the embed depth, not the tube OD, so strand bodies that
+    intentionally reach into the wall are not discarded.
+    """
+    raw = getattr(config.tube_settings, "braided_rope", None) or {}
+    depth = float(raw.get("valley_embed_depth", _DEFAULT_VALLEY_EMBED_DEPTH))
+    tube_r = float(config.tube_settings.outer_radius)
+    inner_r = max(tube_r - depth, 0.0)
+    profile = face(circle(max_radius)) - face(circle(inner_r))
+    oriented = _orient_profile_face(profile, path, rotation_z=rotation_z)
+    return sweep(oriented, path, aux=aux)
+
+
+def _clip_strands_to_embed_shell(
+    strands: List[Solid],
+    path,
+    aux,
+    config: Any,
+    params: BraidParams,
+    *,
+    rotation_z: float = 90.0,
+) -> List[Solid]:
+    """Drop strand material below the embed shell so the base tube OD stays round."""
+    if not strands:
+        return strands
+    max_r = _strand_envelope_radius(params) + float(config.tube_settings.outer_radius)
+    clip_solid = _swept_embed_clip_shell(
+        path, aux, config, max_radius=max_r, rotation_z=rotation_z
+    )
+    clipped: List[Solid] = []
+    for strand in strands:
+        try:
+            result = intersect(strand, clip_solid)
+        except Exception as exc:
+            raise RuntimeError("strand embed clip failed") from exc
+        if result.Volume() <= 1e-3:
+            raise RuntimeError("strand has no volume above embed shell after clip")
+        clipped.append(result)
+    return clipped
 
 
 class BraidedRopeModel:
@@ -395,7 +552,7 @@ class BraidedRopeModel:
 
         total_strands = 2 * params.num_strands_per_dir
         strands: List[Solid] = []
-        method_counts = {"loft": 0, "loft-ruled": 0, "sweep": 0, "failed": 0}
+        method_counts = {"loft": 0, "loft-ruled": 0, "sweep": 0}
         bar = tqdm(
             total=total_strands,
             desc="Building braid strands",
@@ -411,16 +568,27 @@ class BraidedRopeModel:
                     frames, path_length, params, phase, direction, loft_samples
                 )
                 method_counts[method] = method_counts.get(method, 0) + 1
-                if strand is not None:
-                    strands.append(strand)
+                strands.append(strand)
                 bar.update(1)
         bar.close()
 
+        if len(strands) != total_strands:
+            raise RuntimeError(
+                f"expected {total_strands} braid strands, built {len(strands)}"
+            )
+
         logger.info(
-            "BraidedRopeModel: built %d/%d strands (loft=%d, loft-ruled=%d, sweep=%d, failed=%d)",
+            "BraidedRopeModel: built %d/%d strands (loft=%d, loft-ruled=%d, sweep=%d)",
             len(strands), total_strands,
             method_counts["loft"], method_counts["loft-ruled"],
-            method_counts["sweep"], method_counts["failed"],
+            method_counts["sweep"],
         )
+
+        if base_face_type in _SWEPT_BASE_FACE_TYPES and strands:
+            rotation_z = float((face_kwargs or {}).get("rotation_z", 90.0))
+            strands = _clip_strands_to_embed_shell(
+                strands, path, aux, config, params, rotation_z=rotation_z
+            )
+            return Compound.makeCompound([core, *strands])
 
         return Compound.makeCompound([core, *strands])

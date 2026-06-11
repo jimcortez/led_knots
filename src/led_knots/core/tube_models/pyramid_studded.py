@@ -187,12 +187,10 @@ class PyramidStuddedModel:
         )
 
         if not row_positions:
-            logger.warning(
+            raise ValueError(
                 "pyramid_studded: path too short for any pyramid rows "
-                "(length=%.2f mm, axial_pitch=%.2f mm)",
-                path_length, axial_pitch,
+                f"(length={path_length:.2f} mm, axial_pitch={axial_pitch:.2f} mm)"
             )
-            return base_tube
 
         d_theta = 2.0 * math.pi / circ_count
         pyramids: List[Solid] = []

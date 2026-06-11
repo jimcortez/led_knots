@@ -2,12 +2,45 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator, List, Optional
+
+logger = logging.getLogger(__name__)
+
+_STAGE_DESCRIPTIONS = {
+    "draw_part.sweep": "Sweeping tube along path",
+    "draw_part.optimize": "Running print optimization",
+}
+
+_EXPORT_LABELS = {
+    "stl": "Exporting STL",
+    "step": "Exporting STEP",
+    "3mf": "Exporting 3MF",
+    "glb": "Exporting GLB",
+    "gltf": "Exporting GLTF",
+    "obj": "Exporting OBJ",
+    "preview": "Rendering preview",
+    "config": "Writing config snapshot",
+    "stats": "Writing render stats",
+}
+
+
+def describe_stage(name: str) -> str:
+    """Return a human-readable description for a render pipeline stage."""
+    if name in _STAGE_DESCRIPTIONS:
+        return _STAGE_DESCRIPTIONS[name]
+    prefix = "render_pipeline.job."
+    if name.startswith(prefix):
+        rest = name[len(prefix) :]
+        fmt, _, filename = rest.partition(".")
+        label = _EXPORT_LABELS.get(fmt, f"Running export ({fmt})")
+        return f"{label} ({filename})"
+    return name
 
 
 @dataclass
@@ -30,11 +63,14 @@ class RenderStats:
 
     @contextmanager
     def record_stage(self, name: str) -> Iterator[None]:
+        description = describe_stage(name)
+        logger.info("%s", description)
         start = time.perf_counter()
         try:
             yield
         finally:
             elapsed = time.perf_counter() - start
+            logger.info("%s completed (%.3fs)", description, elapsed)
             self.add_stat(name, f"{elapsed:.4f}", f"Stage duration in seconds")
 
     def populate_git_info(self) -> None:

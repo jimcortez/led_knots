@@ -1,0 +1,20 @@
+knot_type: rod
+name: test_short_rod_led_tube_braided
+# -----------------------------------------------------------------------------
+# Output bounds: bounding box for knot path scaling
+# -----------------------------------------------------------------------------
+output_bounds:
+  width: 100    # mm
+  length: 100   # mm
+  height: 100   # mm
+
+face_type: braided_rope_tube
+
+face_settings:
+  # Braided-rope sleeve along the path (Step 4).
+  braided_rope_tube:
+    braided_rope:
+      num_strands_per_dir: 20
+      braid_tightness: 1.0
+      pack_factor: 0.9
+      weave_amplitude_factor: 1.0

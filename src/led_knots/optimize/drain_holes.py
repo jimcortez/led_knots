@@ -67,8 +67,9 @@ def drill_drain_holes(
     z_max = float(bb.zmax) + settings.margin_mm
     height = z_max - z_min
     if height <= 0:
-        logger.warning("drill_drain_holes: degenerate Z-extents (height=%.3f)", height)
-        return part, []
+        raise ValueError(
+            f"drill_drain_holes: degenerate Z-extents (height={height:.3f})"
+        )
     z_center = (z_min + z_max) / 2.0
     radius = settings.diameter_mm / 2.0
 
@@ -95,20 +96,17 @@ def drill_drain_holes(
         )
         try:
             out_solid = out_solid.cut(cyl)
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning(
-                "drill_drain_holes: cut failed for cavity vol=%.0f mm³ at (%.1f, %.1f, %.1f): %r",
-                cav.volume_mm3,
-                cx,
-                cy,
-                cav.centroid[2],
-                exc,
-            )
-            continue
+        except Exception as exc:
+            raise RuntimeError(
+                f"drill_drain_holes: cut failed for cavity vol={cav.volume_mm3:.0f} mm³ "
+                f"at ({cx:.1f}, {cy:.1f}, {cav.centroid[2]:.1f})"
+            ) from exc
         drilled.append(cav)
 
-    if not drilled:
-        return part, []
+    if len(drilled) != len(trapped):
+        raise RuntimeError(
+            f"drilled {len(drilled)}/{len(trapped)} trapped cavities"
+        )
     logger.info(
         "[optimize] drilled %d drain/vent hole(s), Ø%.2fmm",
         len(drilled),

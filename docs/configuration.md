@@ -191,6 +191,7 @@ face_settings:
       samples_per_period: 20
       strand_start: 2.0
       strand_end_offset: 2.0
+      valley_embed_depth: 0.5        # mm – swept-base only
 ```
 
 Keys consumed by `TubeSettings`

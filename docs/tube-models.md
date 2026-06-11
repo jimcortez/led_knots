@@ -265,13 +265,15 @@ Config keys (`face_settings.braided_rope.braided_rope`):
 | `outer_radius` | Outer radius of the rope in mm. Defaults to `config.tube_settings.outer_radius` if not set. | inherited |
 | `float_length` | He et al. `F`: 1 = 1×1 diamond, 2 = 2×2 regular, etc. Must divide `num_strands_per_dir`. | `1` |
 | `helix_angle_deg` | Helix angle of each strand in degrees. | `30.0` |
-| `pack_factor` | `k` in the paper; controls how tightly packed the strands are. | `0.7` |
+| `pack_factor` | `k` in the paper; controls how tightly packed the strands are. Overridden by `braid_tightness` on swept bases. | `0.7` |
 | `strand_aspect_ratio` | Lenticular ellipse major/minor ratio. `1.0` = circular strand. | `1.6` |
 | `tilt_to_helix_angle` | Tilt the ellipse major axis to align with the braid direction. | `True` |
-| `weave_amplitude_factor` | Multiplier on `A_min`; > 1 gives a more pronounced weave bump. | `1.05` |
+| `weave_amplitude_factor` | Multiplier on `A_min`; `1.0` is minimum weave lift (tighter peaks). | `1.05` |
+| `braid_tightness` | Swept-base only: `0` = use `pack_factor` as-is; up to `1` modestly increases `pack_factor` for a tighter sleeve. Does not retarget `outer_radius`. | `0.0` |
 | `samples_per_period` | Loft sample density (interacts with auto-bounded `loft_samples`). | `20` |
 | `strand_start` | Trim from path start in mm. | `2.0` |
 | `strand_end_offset` | Trim from path end in mm. | `2.0` |
+| `valley_embed_depth` | Swept-base only (`base_face_type` not `braid_core`): target depth (mm) for braid valley centerlines below the tube OD. Controls weave placement and print overlap; strand solids are clipped at the tube OD before fuse so the base wall stays cylindrical. Must be `>= 0`, `< outer_radius`, and `<= wall_thickness`. Ignored for standalone `braided_rope`. When `outer_radius` is not set explicitly, the model auto-scales the braid envelope to the tube OD before applying valley embed. | `0.5` |
 
 The constructor derives `Rr`, `a`, `p`, `A`, `pitch`, and `core_radius` from
 these inputs; if `core_radius` ends up `<= 0` it raises `ValueError` with

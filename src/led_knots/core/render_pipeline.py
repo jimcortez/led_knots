@@ -502,12 +502,18 @@ def deliver_part(
 
     plan = RenderPlanner.from_config(config)
     if not plan.has_side_effects:
+        from .render_logging import discard_render_log_buffer
+
+        discard_render_log_buffer()
         return
 
     if plan.want_viewer:
         _ensure_remote_viewer_reachable(config)
 
     plan.bundle_dir.mkdir(parents=True, exist_ok=True)
+    from .render_logging import finalize_render_log
+
+    finalize_render_log(plan.bundle_dir / f"{config.render_bundle_stem}.log")
     ctx = PartArtifacts(part, config, path=path, aux=aux, face_kwargs=face_kwargs)
     ctx._normalize()
 

@@ -72,11 +72,13 @@ face_settings:
       helix_angle_deg: 30.0
       strand_aspect_ratio: 1.6       # 1.0 = circular strand cross-section
       tilt_to_helix_angle: true      # align ellipse major axis to braid direction
-      weave_amplitude_factor: 1.05
+      weave_amplitude_factor: 1.0
       pack_factor: 0.7
+      braid_tightness: 0.0          # 0=default; up to 1 modestly fattens strands (swept-base)
       samples_per_period: 20
       strand_start: 2.0              # mm – trim from path start
       strand_end_offset: 2.0         # mm – trim from path end
+      valley_embed_depth: 0.5        # mm – swept-base only: braid valleys sink into tube OD
 
   # Braided-rope sleeve on an LED tube (inner wire hole + connectors).
   braided_rope_tube:
@@ -88,11 +90,13 @@ face_settings:
       helix_angle_deg: 30.0
       strand_aspect_ratio: 1.6
       tilt_to_helix_angle: true
-      weave_amplitude_factor: 1.05
+      weave_amplitude_factor: 1.0
       pack_factor: 0.7
+      braid_tightness: 0.0
       samples_per_period: 20
       strand_start: 2.0
       strand_end_offset: 2.0
+      valley_embed_depth: 0.5        # mm – braid valleys sink into tube OD for controlled fusion
 
 # -----------------------------------------------------------------------------
 # Path / twist limits
@@ -229,13 +233,13 @@ server:
 rendering:
   output_dir: renders
   name: null
-  tolerance: 0.0001
+  tolerance: 0.001
   angular_tolerance: 0.05
   exports:
     - format: stl
       enabled: true
       filename: "{name}.stl"
-      stl_ascii: true
+      stl_ascii: false
     - format: preview
       enabled: true
       filename: "{name}.png"

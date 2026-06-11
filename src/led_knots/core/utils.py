@@ -135,9 +135,6 @@ def parse_render_args(description: str = "Render a model from a config file"):
     _add_render_optional_flags(parser)
     args = parser.parse_args()
 
-    if args.verbose:
-        logging.basicConfig(level=logging.DEBUG)
-
     return args
 
 
@@ -235,7 +232,6 @@ def draw_part(path, config, aux=None, **face_kwargs):
 
     face_kwargs_dict = face_kwargs or {}
 
-    logger.debug("Sweeping and rendering.")
     with config.render_stats.record_stage("draw_part.sweep"):
         if config.max_print_bounds.enabled:
             result = build_segmented_tube_assembly(

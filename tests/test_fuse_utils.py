@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import cadquery as cq
+import pytest
 from cadquery.occ_impl.shapes import Compound
 
 from led_knots.core.fuse_utils import fuse_part_solids
@@ -39,3 +40,12 @@ def test_fuse_assembly_is_noop() -> None:
     assy = cq.Assembly(name="test")
     assy.add(cq.Workplane("XY").box(1, 1, 1).val(), name="a")
     assert fuse_part_solids(assy, name="assy") is assy
+
+
+def test_fuse_separate_lumps_raises() -> None:
+    a = cq.Workplane("XY").box(2, 2, 2).val()
+    b = cq.Workplane("XY").move(10, 0).box(2, 2, 2).val()
+    compound = Compound.makeCompound([a, b])
+
+    with pytest.raises(RuntimeError, match="physically separate lumps"):
+        fuse_part_solids(compound, name="separate")

@@ -2,9 +2,32 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
-from led_knots.core.render_stats import RenderStats
+from led_knots.core.render_stats import RenderStats, describe_stage
+
+
+def test_describe_stage_known_stages():
+    assert describe_stage("draw_part.sweep") == "Sweeping tube along path"
+    assert describe_stage("draw_part.optimize") == "Running print optimization"
+
+
+def test_describe_stage_export_job():
+    assert describe_stage("render_pipeline.job.stl.part.stl") == "Exporting STL (part.stl)"
+    assert describe_stage("render_pipeline.job.preview.part.png") == "Rendering preview (part.png)"
+    assert describe_stage("render_pipeline.job.config.part.yaml") == "Writing config snapshot (part.yaml)"
+
+
+def test_record_stage_logs_start_and_end(caplog):
+    caplog.set_level(logging.INFO, logger="led_knots.core.render_stats")
+    stats = RenderStats()
+    with stats.record_stage("draw_part.sweep"):
+        pass
+    messages = [record.message for record in caplog.records]
+    assert messages[0] == "Sweeping tube along path"
+    assert messages[1].startswith("Sweeping tube along path completed (")
+    assert messages[1].endswith("s)")
 
 
 def test_add_stat_namespacing():

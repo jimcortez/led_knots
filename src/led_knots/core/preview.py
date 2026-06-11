@@ -132,34 +132,21 @@ def _trimesh_scene_to_pyrender_meshes_with_poses(
     if isinstance(trimesh_scene, trimesh.Trimesh):
         try:
             pr_mesh = pyrender.Mesh.from_trimesh(trimesh_scene, material=material)
-            result.append((pr_mesh, np.eye(4, dtype=np.float32)))
-        except Exception as e:
-            logger.warning("Skipping geometry: %s", e)
-        return result
+        except Exception as exc:
+            raise RuntimeError("preview mesh conversion failed") from exc
+        return [(pr_mesh, np.eye(4, dtype=np.float32))]
 
-    # Scene: merge all geometry with transforms applied (scene.dump()), then one mesh at identity
     try:
         merged = trimesh.util.concatenate(trimesh_scene)
-    except Exception as e:
-        logger.warning("Scene concatenate failed: %s", e)
-        merged = None
-    if merged is not None and hasattr(merged, "vertices") and len(merged.vertices) > 0:
-        try:
-            pr_mesh = pyrender.Mesh.from_trimesh(merged, material=material)
-            result.append((pr_mesh, np.eye(4, dtype=np.float32)))
-        except Exception as e:
-            logger.warning("Pyrender from merged mesh failed: %s", e)
-    if not result:
-        # Fallback: add each geometry at identity
-        for geom in trimesh_scene.geometry.values():
-            if not isinstance(geom, trimesh.Trimesh):
-                continue
-            try:
-                pr_mesh = pyrender.Mesh.from_trimesh(geom, material=material)
-                result.append((pr_mesh, np.eye(4, dtype=np.float32)))
-            except Exception as e:
-                logger.warning("Skipping geometry in GLB: %s", e)
-    return result
+    except Exception as exc:
+        raise RuntimeError("preview scene concatenate failed") from exc
+    if not hasattr(merged, "vertices") or len(merged.vertices) == 0:
+        raise RuntimeError("preview scene has no mesh vertices")
+    try:
+        pr_mesh = pyrender.Mesh.from_trimesh(merged, material=material)
+    except Exception as exc:
+        raise RuntimeError("preview pyrender conversion failed") from exc
+    return [(pr_mesh, np.eye(4, dtype=np.float32))]
 
 
 def render_glb_to_image(
