@@ -55,16 +55,22 @@ def _seed_x_dir(tangent: Tuple[float, float, float]) -> Tuple[float, float, floa
 
 
 def _t_values_uniform_arc(path, num_samples: int) -> List[float]:
-    """t values at uniform arc length when path is a single edge; falls back to uniform t."""
+    """t values at uniform arc length along a single-edge path."""
     edges = path.Edges()
-    if len(edges) != 1 or num_samples < 2:
-        return [i / (num_samples - 1) for i in range(num_samples)] if num_samples > 1 else [1.0]
+    if len(edges) != 1:
+        raise ValueError(
+            f"uniform arc-length sampling requires a single-edge path (got {len(edges)} edges)"
+        )
+    if num_samples < 2:
+        return [1.0]
     edge = edges[0]
     adaptor = BRepAdaptor_Curve(edge.wrapped)
     u1, u2 = adaptor.FirstParameter(), adaptor.LastParameter()
     dist = GCPnts_UniformAbscissa(adaptor, num_samples, u1, u2)
     if not dist.IsDone():
-        return [i / (num_samples - 1) for i in range(num_samples)]
+        raise RuntimeError(
+            f"GCPnts_UniformAbscissa failed for path with {num_samples} samples"
+        )
     out: List[float] = []
     span = u2 - u1
     for i in range(1, dist.NbPoints() + 1):

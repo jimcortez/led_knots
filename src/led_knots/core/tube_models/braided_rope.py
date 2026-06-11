@@ -14,14 +14,12 @@ from __future__ import annotations
 
 import logging
 import math
-import signal
 import sys
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 import cadquery as cq
-from cadquery import Location, Plane, Vector, Wire, Edge
+from cadquery import Location, Plane, Vector, Wire
 from cadquery.func import circle, face, intersect, sweep
 from cadquery.occ_impl.shapes import Compound, Solid
 from tqdm.auto import tqdm
@@ -30,20 +28,6 @@ from ..path_frames import PathFrame, frame_at_arc_length, sample_path_frames
 from .swept_face import SweptFaceModel
 
 logger = logging.getLogger(__name__)
-
-
-@contextmanager
-def _time_limit(seconds: int):
-    """Raise TimeoutError if the wrapped block runs past `seconds` (Unix only)."""
-    def _handler(signum, frame):
-        raise TimeoutError(f"exceeded {seconds}s")
-    prev = signal.signal(signal.SIGALRM, _handler)
-    signal.alarm(seconds)
-    try:
-        yield
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, prev)
 
 
 # ---------------------------------------------------------------------------
@@ -263,23 +247,7 @@ def _build_braid_strand(
         for i in range(loft_samples)
     ]
 
-    try:
-        return Solid.makeLoft(wires, ruled=False), "loft"
-    except Exception:
-        try:
-            return Solid.makeLoft(wires, ruled=True), "loft-ruled"
-        except Exception:
-            pass
-
-    try:
-        with _time_limit(30):
-            path_pts = [Vector(*p) for p in pts]
-            path_edge = Edge.makeSpline(path_pts)
-            path_wire = Wire.assembleEdges([path_edge])
-            profile = _lenticular_wire(pts[0], tangents[0], x_dirs[0], params, direction)
-            return Solid.sweep(profile, [], path_wire, makeSolid=True, isFrenet=True), "sweep"
-    except (TimeoutError, Exception) as exc:
-        raise RuntimeError("failed to build braid strand") from exc
+    return Solid.makeLoft(wires, ruled=False)
 
 
 def _build_core_tube(frames: List[PathFrame], params: BraidParams) -> Solid:
@@ -552,7 +520,6 @@ class BraidedRopeModel:
 
         total_strands = 2 * params.num_strands_per_dir
         strands: List[Solid] = []
-        method_counts = {"loft": 0, "loft-ruled": 0, "sweep": 0}
         bar = tqdm(
             total=total_strands,
             desc="Building braid strands",
@@ -564,11 +531,11 @@ class BraidedRopeModel:
                 phase = i * (2.0 * math.pi / params.num_strands_per_dir)
                 if direction == 1:
                     phase += math.pi / params.num_strands_per_dir
-                strand, method = _build_braid_strand(
-                    frames, path_length, params, phase, direction, loft_samples
+                strands.append(
+                    _build_braid_strand(
+                        frames, path_length, params, phase, direction, loft_samples
+                    )
                 )
-                method_counts[method] = method_counts.get(method, 0) + 1
-                strands.append(strand)
                 bar.update(1)
         bar.close()
 
@@ -578,10 +545,9 @@ class BraidedRopeModel:
             )
 
         logger.info(
-            "BraidedRopeModel: built %d/%d strands (loft=%d, loft-ruled=%d, sweep=%d)",
-            len(strands), total_strands,
-            method_counts["loft"], method_counts["loft-ruled"],
-            method_counts["sweep"],
+            "BraidedRopeModel: built %d/%d strands",
+            len(strands),
+            total_strands,
         )
 
         if base_face_type in _SWEPT_BASE_FACE_TYPES and strands:

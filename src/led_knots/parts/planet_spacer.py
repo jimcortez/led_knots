@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-import logging
-
 import cadquery as cq
 from cadquery.func import *  # match project functional API style
 
 from led_knots.core import render_part
 from led_knots.core.config import Config
-
-logger = logging.getLogger(__name__)
 
 
 MM_PER_IN = 25.4
@@ -44,19 +40,7 @@ def build_planet_spacer(
     f = float(max(0.0, fillet_mm))
     if f > 0:
         wp = cq.Workplane("XY").add(solid)
-        try:
-            # Fillet the circular edges on the top and bottom faces.
-            solid = wp.faces(">Z or <Z").edges().fillet(f).val()
-        except Exception as e:
-            logger.warning(
-                "Fillet(%.3f mm) failed; falling back to smaller fillet. (%s)", f, e
-            )
-            f2 = min(0.5, f * 0.66)
-            if f2 > 0:
-                try:
-                    solid = wp.faces(">Z or <Z").edges().fillet(f2).val()
-                except Exception as e2:
-                    logger.warning("Fallback fillet(%.3f mm) also failed. (%s)", f2, e2)
+        solid = wp.faces(">Z or <Z").edges().fillet(f).val()
 
     return solid
 

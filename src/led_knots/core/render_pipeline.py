@@ -237,10 +237,7 @@ def _export_obj_from_glb(glb_bytes: bytes, output_path: Path, obj_job: Rendering
         sys.exit(2)
     target = obj_job.target_face_count
     if target is not None and len(mesh.faces) > target > 0:
-        try:
-            mesh = mesh.simplify_quadratic_decimation(target)
-        except Exception as exc:
-            logger.warning("Mesh decimation failed (%r); continuing with original mesh.", exc)
+        mesh = mesh.simplify_quadratic_decimation(target)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     mesh.export(str(output_path), file_type="obj")
     logger.info("Exported mesh OBJ to %s", output_path)
