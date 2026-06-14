@@ -19,8 +19,9 @@ import cadquery as cq
 import trimesh
 import yaml
 
-from .config import RenderingExportJob
+from .config import Config, RenderingExportJob
 from .preview import render_glb_to_image
+from .render_bundle import RenderBundle
 from .render_planner import ExportJob, RenderPlanner
 
 logger = logging.getLogger(__name__)
@@ -522,3 +523,18 @@ def deliver_part(
 
     n_files = sum(1 for j in plan.jobs if j.resolved_path.exists())
     logger.info("Wrote render bundle to %s/ (%d files)", plan.bundle_dir, n_files)
+
+
+def upload_glb_to_viewer(glb_bytes: bytes, config: Config, name: str) -> None:
+    """Post GLB bytes to cadquery-web-viewer using ``config`` viewer settings."""
+    if config.viewer_server_type == "remote":
+        _ensure_remote_viewer_reachable(config)
+    _cadquery_web_viewer_show(config, name, glb_bytes)
+
+
+def upload_render_bundle(bundle: RenderBundle, config: Config) -> None:
+    """Read an existing render bundle GLB and upload it to cadquery-web-viewer."""
+    glb_bytes = bundle.glb_path.read_bytes()
+    name = config.name or "Knot"
+    logger.info("Uploading %s to cadquery-web-viewer as %r", bundle.glb_path, name)
+    upload_glb_to_viewer(glb_bytes, config, name)

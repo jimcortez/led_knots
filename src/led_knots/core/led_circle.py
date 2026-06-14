@@ -197,12 +197,12 @@ def _validate_led_circle_face_geometry(
     connector_overlaps_oval = connector_bottom_y < oval_top_y  # Extends below oval edge
     connector_overlaps_ring = connector_top_y > inner_radius  # Extends above ring edge
     
-    connector_x_min = 0.5 - connector_width / 2
-    connector_x_max = 0.5 + connector_width / 2
-    oval_x_min = 0.5 - oval_x / 2
-    oval_x_max = 0.5 + oval_x / 2
-    ring_x_min = 0.5 - inner_radius
-    ring_x_max = 0.5 + inner_radius
+    connector_x_min = -connector_width / 2
+    connector_x_max = connector_width / 2
+    oval_x_min = -oval_x / 2
+    oval_x_max = oval_x / 2
+    ring_x_min = -inner_radius
+    ring_x_max = inner_radius
     
     connector_in_ring_x = (connector_x_min >= ring_x_min and connector_x_max <= ring_x_max)
     connectivity_ok = connector_overlaps_oval and connector_overlaps_ring and connector_in_ring_x
@@ -414,13 +414,13 @@ def create_led_circle_face(
     overlap_amount = min(0.15, connector_width * 0.15)  # 0.15mm or 15% of width, whichever is smaller
     
     # Extend connector above inner_radius to overlap with the inner ring (circle)
-    # The inner ring is a circle centered at (0.5, 0) with radius inner_radius
+    # The inner ring is a circle centered at the origin with radius inner_radius
     # Ensure we don't extend beyond the outer ring boundary
     max_allowed_y = outer_radius - 0.1  # Leave small margin from outer edge
     connector_top_y = min(inner_radius + overlap_amount, max_allowed_y)
     
     # Extend connector below oval_top_y to overlap with the oval (ellipse)
-    # The oval is an ellipse centered at (0.5, 0) extending to oval_y/2 in Y direction
+    # The oval is an ellipse centered at the origin extending to oval_y/2 in Y direction
     connector_bottom_y = max(oval_top_y - overlap_amount, -oval_y / 2 + 0.1)  # Don't extend beyond oval bottom
     
     # Calculate new connector length and center position
@@ -446,20 +446,15 @@ def create_led_circle_face(
                         f"oval_x={oval_x:.6f}, oval_y={oval_y:.6f}")
     
     # Create geometry using functional API
-    # All shapes are created in XY plane (orient_for_z_up=True, so keep in XY)
-    profile_center_x = 0.5
-    profile_center_y = 0.0
-    
-    # Helper function to rotate around profile center
+    # All shapes are created in XY plane (orient_for_z_up=True, so keep in XY),
+    # centered on the origin so the swept tube is concentric with the path.
     def rotate_around_center(shape):
         if rotation_z == 0:
             return shape
-        return (shape.moved(x=-profile_center_x, y=-profile_center_y)
-                   .moved(rz=rotation_z)
-                   .moved(x=profile_center_x, y=profile_center_y))
+        return shape.moved(rz=rotation_z)
     
     # Outer ring: annulus (outer circle - inner circle)
-    outer_ring_base = (face(circle(outer_radius)) - face(circle(inner_radius))).moved(x=0.5)
+    outer_ring_base = face(circle(outer_radius)) - face(circle(inner_radius))
     outer_ring = rotate_around_center(outer_ring_base)
     
     # Center oval with rectangular inner cavity: difference (oval - rectangle)
@@ -473,13 +468,13 @@ def create_led_circle_face(
     ell_edge = ellipse(ellipse_r1, ellipse_r2)
     if oval_semi_y > oval_semi_x:
         ell_edge = ell_edge.moved(rz=90)  # major was Y, rotate so oval_semi_x in X, oval_semi_y in Y
-    center_oval_base = (face(ell_edge) - face(rect(rect_inner_x, rect_inner_y))).moved(x=0.5)
+    center_oval_base = face(ell_edge) - face(rect(rect_inner_x, rect_inner_y))
     center_oval = rotate_around_center(center_oval_base)
     
     # Connecting rectangles: top and bottom connectors
-    top_connector_base = plane(connector_width, connector_top_length).moved(x=0.5, y=connector_top_center_y)
+    top_connector_base = plane(connector_width, connector_top_length).moved(y=connector_top_center_y)
     top_connector = rotate_around_center(top_connector_base)
-    bottom_connector_base = plane(connector_width, connector_top_length).moved(x=0.5, y=-connector_top_center_y)
+    bottom_connector_base = plane(connector_width, connector_top_length).moved(y=-connector_top_center_y)
     bottom_connector = rotate_around_center(bottom_connector_base)
     
     # Combine all faces using fuse
@@ -563,20 +558,16 @@ def create_led_circle_tube_face(
             f"inner radius ({inner_radius:.3f} mm) — need a positive gap for the connectors"
         )
 
-    profile_center_x = 0.5
-    profile_center_y = 0.0
-
+    # Profile is centered on the origin so the swept tube is concentric with the path.
     def rotate_around_center(shape):
         if rotation_z == 0:
             return shape
-        return (shape.moved(x=-profile_center_x, y=-profile_center_y)
-                   .moved(rz=rotation_z)
-                   .moved(x=profile_center_x, y=profile_center_y))
+        return shape.moved(rz=rotation_z)
 
-    outer_ring_base = (face(circle(outer_radius)) - face(circle(inner_radius))).moved(x=0.5)
+    outer_ring_base = face(circle(outer_radius)) - face(circle(inner_radius))
     outer_ring = rotate_around_center(outer_ring_base)
 
-    center_tube_base = (face(circle(center_outer_r)) - face(circle(center_inner_r))).moved(x=0.5)
+    center_tube_base = face(circle(center_outer_r)) - face(circle(center_inner_r))
     center_tube = rotate_around_center(center_tube_base)
 
     center_top_y = center_outer_r
@@ -587,9 +578,9 @@ def create_led_circle_tube_face(
     connector_length = connector_top_y - connector_bottom_y
     connector_center_y = (connector_top_y + connector_bottom_y) / 2.0
 
-    top_connector_base = plane(connector_width, connector_length).moved(x=0.5, y=connector_center_y)
+    top_connector_base = plane(connector_width, connector_length).moved(y=connector_center_y)
     top_connector = rotate_around_center(top_connector_base)
-    bottom_connector_base = plane(connector_width, connector_length).moved(x=0.5, y=-connector_center_y)
+    bottom_connector_base = plane(connector_width, connector_length).moved(y=-connector_center_y)
     bottom_connector = rotate_around_center(bottom_connector_base)
 
     result = clean(fuse(outer_ring, center_tube, top_connector, bottom_connector))
@@ -633,20 +624,15 @@ def create_solid_circle_face(
     Returns:
         Face representing a simple filled circle
     """
-    # Create simple filled circle in XY plane (orient_for_z_up=True, so keep in XY)
-    profile_center_x = 0.5
-    profile_center_y = 0.0
-    
-    # Helper function to rotate around profile center
+    # Create simple filled circle in XY plane (orient_for_z_up=True, so keep in XY),
+    # centered on the origin so the swept tube is concentric with the path.
     def rotate_around_center(shape):
         if rotation_z == 0:
             return shape
-        return (shape.moved(x=-profile_center_x, y=-profile_center_y)
-                   .moved(rz=rotation_z)
-                   .moved(x=profile_center_x, y=profile_center_y))
+        return shape.moved(rz=rotation_z)
     
     # Create a simple filled circle
-    circle_base = face(circle(outer_radius)).moved(x=0.5)
+    circle_base = face(circle(outer_radius))
     result = rotate_around_center(circle_base)
     
     # If orient_to_path is provided, orient the result to the path
@@ -689,20 +675,15 @@ def create_square_face(
     Returns:
         Face representing a simple filled square
     """
-    # Create simple filled square in XY plane (orient_for_z_up=True, so keep in XY)
-    profile_center_x = 0.5
-    profile_center_y = 0.0
-    
-    # Helper function to rotate around profile center
+    # Create simple filled square in XY plane (orient_for_z_up=True, so keep in XY),
+    # centered on the origin so the swept tube is concentric with the path.
     def rotate_around_center(shape):
         if rotation_z == 0:
             return shape
-        return (shape.moved(x=-profile_center_x, y=-profile_center_y)
-                   .moved(rz=rotation_z)
-                   .moved(x=profile_center_x, y=profile_center_y))
+        return shape.moved(rz=rotation_z)
     
     # Create a simple filled square
-    square_base = face(rect(outer_radius*2, outer_radius*2)).moved(x=0.5)
+    square_base = face(rect(outer_radius*2, outer_radius*2))
     result = rotate_around_center(square_base)
     
     # If orient_to_path is provided, orient the result to the path

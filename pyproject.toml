@@ -43,6 +43,7 @@ dev = [
 [project.scripts]
 render-knot = "led_knots.cli:main_knot"
 render-part = "led_knots.cli:main_part"
+upload-knot = "led_knots.cli:main_upload_knot"
 
 [build-system]
 requires = ["hatchling"]

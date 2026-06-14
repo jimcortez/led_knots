@@ -138,6 +138,35 @@ def parse_render_args(description: str = "Render a model from a config file"):
     return args
 
 
+def parse_upload_args(description: str = "Upload a render bundle GLB to cadquery-web-viewer"):
+    """
+    Parse command line arguments for upload-knot.
+
+    Args:
+        description: Description for the argument parser
+
+    Returns:
+        argparse.Namespace with a required positional ``bundle`` path and optional verbose flag.
+    """
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument(
+        "bundle",
+        type=str,
+        metavar="PATH",
+        help=(
+            "Render bundle directory or its {stem}.yaml config snapshot. "
+            "The bundle must contain {stem}.glb."
+        ),
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable verbose (DEBUG level) logging",
+    )
+    return parser.parse_args()
+
+
 # Backward-compatible alias for tests and library callers.
 parse_args = parse_render_args
 

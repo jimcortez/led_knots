@@ -1,0 +1,18 @@
+knot_type: rod
+name: test_short_rod_led_tube_braided_debug
+# Fast-iteration variant of test_short_rod_led_tube_braided.yaml: far fewer
+# strands so a full render (build + clip + fuse + preview) finishes in minutes.
+output_bounds:
+  width: 100    # mm
+  length: 100   # mm
+  height: 60    # mm
+
+face_type: braided_rope_tube
+
+face_settings:
+  braided_rope_tube:
+    braided_rope:
+      num_strands_per_dir: 6
+      braid_tightness: 1.0
+      pack_factor: 0.9
+      weave_amplitude_factor: 1.0

@@ -1,14 +1,15 @@
 # CLI reference
 
-LED Knots exposes two console commands declared in
+LED Knots exposes three console commands declared in
 [pyproject.toml](../pyproject.toml) under `[project.scripts]`:
 
 | Command | Entry point | Purpose |
 | --- | --- | --- |
 | `render-knot` | `led_knots.cli:main_knot` | Build and export a knot from a config file |
 | `render-part` | `led_knots.cli:main_part` | Build and export an accessory part from a config file |
+| `upload-knot` | `led_knots.cli:main_upload_knot` | Upload an existing render bundle GLB to cadquery-web-viewer |
 
-Both commands share the same flag surface, parsed by `parse_render_args()` in
+Both render commands share the same flag surface, parsed by `parse_render_args()` in
 [src/led_knots/core/utils.py](../src/led_knots/core/utils.py).
 
 ## Invocation
@@ -79,6 +80,35 @@ All `*.py` modules under [src/led_knots/parts/](../src/led_knots/parts/) except
 render-knot knot_configs/test_short_rod_led_tube.yaml
 render-part part_configs/planet_spacer.yaml
 ```
+
+## upload-knot
+
+Upload a previously rendered bundle to cadquery-web-viewer without rebuilding geometry.
+
+```bash
+upload-knot renders/rod_20260612-152817
+upload-knot renders/rod_20260612-152817/rod_20260612-152817.yaml
+upload-knot renders/rod_20260612-152817 -v
+```
+
+### Positional `PATH` argument
+
+- **Type:** path string (required).
+- **Effect:** Render bundle directory or its `{stem}.yaml` config snapshot. The bundle
+  must contain `{stem}.glb` where `{stem}` matches the directory name.
+- **Viewer settings:** Always taken from `server.viewer` in the bundle YAML snapshot
+  (merged with `config.yaml` / `config.local.yaml`). When the bundle YAML is missing,
+  repo defaults apply. No `--viewer` or `--server` flags on this command.
+- **Prerequisite:** For `server.viewer.mode: remote` (the default in `config.yaml`),
+  start cadquery-web-viewer in another terminal first:
+
+```bash
+cadquery-web-viewer --host localhost --port 32323
+```
+
+### `-v` / `--verbose`
+
+- **Effect:** Enable DEBUG-level logging.
 
 See [Configuration](configuration.md) for layering rules and worked examples.
 

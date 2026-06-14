@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 
 import cadquery as cq
 from cadquery import Location, Plane, Vector, Wire
-from cadquery.func import circle, face, intersect, sweep
+from cadquery.func import circle, clean, face, fuse, intersect, sweep
 from cadquery.occ_impl.shapes import Compound, Solid
 from tqdm.auto import tqdm
 
@@ -183,6 +183,10 @@ def _lenticular_wire(center, tangent, x_in_plane, params: BraidParams, direction
     return Wire.makeEllipse(params.p, params.a, pl.origin, pl.zDir, pl.xDir)
 
 
+# Max sections per loft call; longer sequences destabilize OCC ThruSections.
+_LOFT_CHUNK_SECTIONS = 32
+
+
 def _build_braid_strand(
     path_frames_seq: List[PathFrame],
     path_length: float,
@@ -247,7 +251,43 @@ def _build_braid_strand(
         for i in range(loft_samples)
     ]
 
-    return Solid.makeLoft(wires, ruled=False)
+    # OCC ThruSections degrades on long high-twist section sequences: a single
+    # loft over all sections collapsed CCW strands to ~73% of their analytic
+    # volume (and to garbage at other sample counts), while bounded chunks are
+    # exact for both directions. Loft chunks over shared boundary wires and
+    # fuse them into one strand solid.
+    chunk_solids = []
+    i = 0
+    while i < loft_samples - 1:
+        j = min(i + _LOFT_CHUNK_SECTIONS, loft_samples - 1)
+        chunk_solids.append(Solid.makeLoft(wires[i : j + 1], ruled=False))
+        i = j
+    merged = chunk_solids[0]
+    for chunk in chunk_solids[1:]:
+        merged = fuse(merged, chunk)
+    merged = clean(merged)
+    merged_solids = merged.Solids()
+    if len(merged_solids) != 1:
+        raise RuntimeError(
+            f"braid strand chunks fused into {len(merged_solids)} solids, expected 1 "
+            f"(direction={direction}, phase={phase:.3f})"
+        )
+    solid = merged_solids[0]
+
+    # Guard against folded/collapsed lofts: the solid volume must be close to
+    # ellipse area x centerline length. A bare positive-volume check passes
+    # lofts that lost a quarter of their material to fold-over.
+    centerline_length = sum(
+        math.dist(pts[i], pts[i - 1]) for i in range(1, loft_samples)
+    )
+    expected_volume = math.pi * params.p * params.a * centerline_length
+    volume = solid.Volume()
+    if not (0.85 * expected_volume <= volume <= 1.15 * expected_volume):
+        raise RuntimeError(
+            f"braid strand loft volume {volume:.1f} mm^3 deviates from expected "
+            f"{expected_volume:.1f} mm^3 (direction={direction}, phase={phase:.3f})"
+        )
+    return solid
 
 
 def _build_core_tube(frames: List[PathFrame], params: BraidParams) -> Solid:
@@ -397,19 +437,8 @@ def _params_from_config(config: Any, *, base_face_type: str = "braid_core") -> B
 
 
 def _orient_profile_face(profile, path, *, rotation_z: float = 90.0):
-    profile_center_x = 0.5
-    profile_center_y = 0.0
-
-    def rotate_around_center(shape):
-        if rotation_z == 0:
-            return shape
-        return (
-            shape.moved(x=-profile_center_x, y=-profile_center_y)
-            .moved(rz=rotation_z)
-            .moved(x=profile_center_x, y=profile_center_y)
-        )
-
-    oriented = rotate_around_center(profile.moved(x=0.5))
+    """Match the placement of the swept-base profiles: origin-centered, rotated, on the path."""
+    oriented = profile if rotation_z == 0 else profile.moved(rz=rotation_z)
     face_plane = Plane(origin=path.startPoint(), normal=path.tangentAt(0))
     return oriented.moved(Location(face_plane))
 

@@ -823,6 +823,41 @@ class Config:
             }
             self.viewer_remote_options = None
 
+    def apply_viewer_from_yaml(self) -> None:
+        """
+        Enable cadquery-web-viewer upload using ``server.viewer`` from merged config.
+
+        Used by ``upload-knot`` (no CLI viewer flags). If ``server.viewer.mode`` is
+        ``off``, embedded mode is used so upload can proceed.
+        """
+        vs = self.server_settings.viewer
+        self.viewer_enabled = True
+
+        yaml_mode = vs.mode if vs.mode != "off" else "embedded"
+        block = yaml_mode == "embedded" and vs.embedded_block_until_disconnect
+
+        if yaml_mode == "remote":
+            self.viewer_server_type = "remote"
+            self.viewer_block_until_disconnect = False
+            self.viewer_server_options = None
+            self.viewer_remote_options = {
+                "host": vs.remote_host,
+                "port": vs.remote_port,
+                "upload_timeout": vs.remote_upload_timeout,
+                "post_timeout": vs.remote_post_timeout,
+            }
+        else:
+            self.viewer_server_type = "in-process"
+            self.viewer_block_until_disconnect = block
+            self.viewer_server_options = {
+                "host": vs.embedded_host,
+                "port": vs.embedded_port,
+                "open_browser": vs.embedded_open_browser,
+                "wait_for_first_client": vs.embedded_wait_for_first_client,
+                "wait_for_client_timeout": 120.0,
+            }
+            self.viewer_remote_options = None
+
     @staticmethod
     def _merge_dicts(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
         """Recursively merge override dict into base dict."""
