@@ -29,23 +29,16 @@ def _solid_count(shape) -> int:
     return 1
 
 
-def _solid_volume(solid) -> float:
-    vol = solid.Volume()
-    if vol > 0:
-        return vol
-    bb = solid.BoundingBox()
-    return (bb.xmax - bb.xmin) * (bb.ymax - bb.ymin) * (bb.zmax - bb.zmin)
-
-
 def _fuse_solids_map_reduce(solids: list, *, name: str):
     """
     Fuse many solids in map-reduce rounds: pair neighbors, then pair results.
 
-    Solids are sorted by ascending volume so smaller bodies merge together
-    first and the largest solid is fused last (carried forward when a round
-    has an odd count).
+    Callers place the largest solid first (e.g. core tube) followed by many
+    smaller bodies of nearly equal volume (e.g. braid strands). Pair
+    ``solids[1:]`` so those smaller bodies merge together first; the lead
+    solid is fused last (carried forward when a round has an odd count).
     """
-    current = sorted(solids, key=_solid_volume)
+    current = solids[1:] + [solids[0]]
     n = len(current)
     bar = tqdm(
         total=n - 1,

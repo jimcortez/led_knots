@@ -483,14 +483,24 @@ def _clip_strands_to_embed_shell(
         path, aux, config, max_radius=max_r, rotation_z=rotation_z
     )
     clipped: List[Solid] = []
+    bar = tqdm(
+        total=len(strands),
+        desc="Clipping strands to embed shell",
+        unit="strand",
+        disable=not sys.stderr.isatty(),
+    )
     for strand in strands:
         try:
             result = intersect(strand, clip_solid)
         except Exception as exc:
+            bar.close()
             raise RuntimeError("strand embed clip failed") from exc
         if result.Volume() <= 1e-3:
+            bar.close()
             raise RuntimeError("strand has no volume above embed shell after clip")
         clipped.append(result)
+        bar.update(1)
+    bar.close()
     return clipped
 
 
@@ -581,6 +591,10 @@ class BraidedRopeModel:
 
         if base_face_type in _SWEPT_BASE_FACE_TYPES and strands:
             rotation_z = float((face_kwargs or {}).get("rotation_z", 90.0))
+            logger.info(
+                "BraidedRopeModel: clipping %d strands to embed shell",
+                len(strands),
+            )
             strands = _clip_strands_to_embed_shell(
                 strands, path, aux, config, params, rotation_z=rotation_z
             )
