@@ -18,7 +18,7 @@ LED Knots creates parametric 3D models of various mathematical knots and paths, 
 - **Diffusion ridges**: Optional triangular ridges on the oval surface for enhanced light diffusion and visual effects
 - **Flexible orientation control**: Advanced path curvature analysis and twist optimization
 - **Multiple export formats**: STL, STEP, 3MF, GLB/GLTF support
-- **Web-based preview**: Optional [cadquery-web-viewer](https://pypi.org/project/cadquery-web-viewer/) integration (embedded Flask thread or HTTP to a long-running server)
+- **Web-based preview**: Optional [cadquery-web-viewer](https://pypi.org/project/cadquery-web-viewer/) integration (POST to a running remote server via `--server` or `upload-knot`)
 - **SLA / resin print optimization**: Detects overhangs, islands, and trapped cavities (ray-cast trap test, requires `manifold3d`); auto-rotates parts so the LED-tube radial connectors act as natural support columns; bed-fit gates orientations against `max_print_bounds`; can auto-drill drain/vent holes through trapped cavities (`print_optimization.drain_holes.enabled`). Per-segment rescoring when `max_print_bounds` is enabled. See `print_optimization` in `config.yaml` and the `--optimize` / `--auto-orient` / `--optimize-report-dir` flags.
 
 ## Installation
@@ -41,7 +41,7 @@ pip install -e .
 - CadQuery 2.6.1+
 - NumPy
 - pyknotid (for mathematical knot generation)
-- cadquery-web-viewer (browser 3D preview; optional at runtime unless you use `--server` / `--viewer`)
+- cadquery-web-viewer (browser 3D preview when using `--server` or `upload-knot`)
 
 ## Quick Start
 
@@ -54,12 +54,9 @@ render-knot knot_configs/test_short_rod_led_tube.yaml
 # Render an accessory part
 render-part part_configs/hang_clamp.yaml
 
-# Browser preview: default config uses remote — start the viewer server first
+# Browser preview: start the viewer server first, then pass --server
 #   cadquery-web-viewer --host localhost --port 32323
 render-knot knot_configs/test_short_rod_led_tube.yaml --server
-
-# In-process embedded viewer (opens a local tab)
-render-knot knot_configs/test_short_rod_led_tube.yaml --viewer embedded
 ```
 
 ### Available knot types (`knot_type` in config)
@@ -88,17 +85,16 @@ Both `render-knot` and `render-part` accept the same options:
 | `--name NAME` | Run name for the render bundle folder and default filename templates |
 | `--renders-dir DIR` | Parent directory for render bundles (overrides `rendering.output_dir`) |
 | `--disable-export FORMATS` | Disable export jobs for comma-separated formats (`stl`, `obj`, `stats`, …) |
-| `--server` | Enable browser preview using `server.viewer` from `config.yaml` (legacy alias; prefer `--viewer`) |
-| `--viewer MODE` | `off`, `embedded`, `embedded-block`, or `remote` (overrides `server.viewer.mode` when set) |
+| `--server` | POST the model to a running remote cadquery-web-viewer after writing the render bundle |
 | `--optimize` / `--no-optimize` | Run the SLA print-optimization stage; reports overhang clusters, islands, and connector tagging on the built mesh. |
 | `--auto-orient` | Apply the top-ranked SLA orientation to the exported geometry (implies `--optimize`). For LED-tube knots, the score is biased toward orientations that stand the radial connector strips vertically so they act as natural support columns. |
 | `--optimize-report-dir DIR` | Write annotated PNG diagnostics for the optimizer (top + bottom views, with overhangs in red and connectors in green) to DIR. Implies `--optimize`. |
 | `-v`, `--verbose` | Enable debug-level logging |
 
-When you run a knot without viewer flags, it still builds geometry and writes a
+When you run a knot without `--server`, it builds geometry and writes a
 render bundle (STL, preview PNG, GLB, config YAML, stats CSV by default). Use
-`--server` or `--viewer …` to send the model to **cadquery-web-viewer** after
-files are written.
+`--server` to POST the bundle GLB to **cadquery-web-viewer**, or run
+`upload-knot` on an existing bundle.
 
 ## Configuration
 
@@ -108,7 +104,7 @@ LED Knots uses a centralized configuration system via `config.yaml` in the proje
 - **face_type**: Top-level key selecting the cross-section face (e.g. `led_circle`, `square`)
 - **Face settings**: Per-face options keyed by face name: `outer_diameter` or `outer_width` (for square), `wall_thickness` (e.g. in led_circle), `rect_inner_x` / `rect_inner_y` (led_circle cavity, with comments referencing original strip values), oval/connector/diffusion options. Use `inherit_from` to inherit from another face and override keys.
 - **Path**: `min_90_degree_twist_distance` (mm) for twist rate limits along the path
-- **Server**: `server.viewer` (embedded vs remote) and optional styling keys mapped to `CADQUERY_WEB_VIEWER_*` environment variables (`protocol`, `texture`, `color_faces`, `color_edges`, `color_vertices`)
+- **Server**: `server.viewer` (remote connection) and optional styling keys mapped to `CADQUERY_WEB_VIEWER_*` environment variables (`protocol`, `texture`, `color_faces`, `color_edges`, `color_vertices`)
 - **Rendering**: `rendering.exports` — per-format export jobs (STL, STEP, GLB, preview PNG, OBJ, …)
 
 ### Server and browser viewer
@@ -124,21 +120,16 @@ server:
   # color_edges: '#1a1aff'
   # color_vertices: '#1a1a1a'
   viewer:
-    mode: remote          # off | embedded | remote
-    embedded:
-      host: 127.0.0.1
-      port: 32323
-      open_browser: true
-      wait_for_first_client: false
-      block_until_disconnect: false
-    remote:
-      host: localhost
-      port: 32323
+    host: localhost
+    port: 32323
+    upload_timeout: 300.0
+    post_timeout: 60.0
 ```
 
-- **viewer.mode `remote`**: Each knot run POSTs the model to the viewer after writing the render bundle.
-- **viewer.mode `embedded`**: The viewer starts an in-process Flask server when you call `show()`; use `embedded-block` / `block_until_disconnect: true` for the “wait until you close the tab” workflow.
-- **Styling keys** at the `server` level set `CADQUERY_WEB_VIEWER_*` so defaults match your project without exporting shell variables by hand.
+Start `cadquery-web-viewer` on that host/port, then use `--server` on render or
+`upload-knot` on a bundle. **Styling keys** at the `server` level set
+`CADQUERY_WEB_VIEWER_*` so defaults match your project without exporting shell
+variables by hand.
 
 ### Configuration details
 

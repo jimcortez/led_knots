@@ -99,7 +99,7 @@ def test_deliver_part_writes_log_file(tmp_path, clean_render_logging, monkeypatc
     monkeypatch.chdir(tmp_path)
     cfg_path = tmp_path / "cfg.yaml"
     cfg_path.write_text("knot_type: rod\nrendering:\n  name: Test\n")
-    sys.argv = ["test", str(cfg_path), "--viewer", "off"]
+    sys.argv = ["test", str(cfg_path)]
     config = Config(args=parse_render_args())
     config.render_stats = __import__(
         "led_knots.core.render_stats", fromlist=["RenderStats"]
@@ -139,7 +139,7 @@ def test_deliver_part_without_side_effects_discards_log(tmp_path, clean_render_l
     monkeypatch.chdir(tmp_path)
     cfg_path = tmp_path / "cfg.yaml"
     cfg_path.write_text("knot_type: rod\n")
-    sys.argv = ["test", str(cfg_path), "--viewer", "off"]
+    sys.argv = ["test", str(cfg_path)]
     config = Config(args=parse_render_args())
     config.render_stats = __import__(
         "led_knots.core.render_stats", fromlist=["RenderStats"]

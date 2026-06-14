@@ -4,8 +4,8 @@ The [src/led_knots/parts/](../src/led_knots/parts/) package collects parametric
 accessory parts that ride alongside the knot tubes themselves: clamps to hold
 the tube, spacers to set its position against other hardware, and so on. They
 share the same config loader and render pipeline as the knot scripts, so you
-get the same `--export`, `--output-mesh`, `--preview`, and `--server` /
-`--viewer` behaviour for free.
+get the same `--export`, `--output-mesh`, `--preview`, and `--server`
+behaviour for free.
 
 This page documents the parts currently shipped and shows how to add another
 one without re-inventing the surrounding plumbing.
@@ -89,7 +89,7 @@ render-part part_configs/hang_clamp.yaml
 ```
 
 The config must include `part_type: hang_clamp`. Standard CLI flags (`--server`,
-`--viewer`, `--optimize` / `--auto-orient`, `--optimize-report-dir`, `-v`)
+`--optimize` / `--auto-orient`, `--optimize-report-dir`, `-v`)
 work — see the [CLI reference](cli-reference.md).
 
 Use it from Python when assembling a larger model:

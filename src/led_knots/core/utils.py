@@ -56,18 +56,9 @@ def _add_render_optional_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         '--server',
         action='store_true',
-        help='Enable browser preview using server.viewer settings from config.yaml',
-    )
-    parser.add_argument(
-        '--viewer',
-        type=str,
-        choices=('off', 'embedded', 'embedded-block', 'remote'),
-        default=None,
-        metavar='MODE',
         help=(
-            'Web preview: off | embedded (in-process server) | embedded-block '
-            '(wait until browser disconnect) | remote (HTTP to cadquery-web-viewer). '
-            'When set, overrides server.viewer.mode from config.'
+            'POST the model to a running remote cadquery-web-viewer after writing '
+            'the render bundle (connection settings from server.viewer in config)'
         ),
     )
     parser.add_argument(

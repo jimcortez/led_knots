@@ -31,7 +31,7 @@ def _write_bundle(
         body = yaml_body or (
             "knot_type: rod\n"
             "rendering:\n  name: rod\n"
-            "server:\n  viewer:\n    mode: remote\n    remote:\n      host: testhost\n      port: 42424\n"
+            "server:\n  viewer:\n    host: testhost\n    port: 42424\n"
         )
         (bundle_dir / f"{stem}.yaml").write_text(body, encoding="utf-8")
     return bundle_dir
@@ -69,17 +69,31 @@ def test_apply_viewer_from_yaml_remote(tmp_path, monkeypatch):
     cfg_path = tmp_path / "cfg.yaml"
     cfg_path.write_text(
         "knot_type: rod\n"
-        "server:\n  viewer:\n    mode: remote\n    remote:\n      host: testhost\n      port: 42424\n",
+        "server:\n  viewer:\n    host: testhost\n    port: 42424\n",
         encoding="utf-8",
     )
     sys.argv = ["test", str(cfg_path)]
     config = Config(args=parse_render_args())
     config.apply_viewer_from_yaml()
     assert config.viewer_enabled is True
-    assert config.viewer_server_type == "remote"
     assert config.viewer_remote_options is not None
     assert config.viewer_remote_options["host"] == "testhost"
     assert config.viewer_remote_options["port"] == 42424
+
+
+def test_init_viewer_from_args_server_flag(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(
+        "knot_type: rod\n"
+        "server:\n  viewer:\n    host: localhost\n    port: 32323\n",
+        encoding="utf-8",
+    )
+    sys.argv = ["test", str(cfg_path), "--server"]
+    config = Config(args=parse_render_args())
+    assert config.viewer_enabled is True
+    assert config.viewer_remote_options["host"] == "localhost"
+    assert config.viewer_remote_options["port"] == 32323
 
 
 def test_main_upload_knot_posts_glb(tmp_path, argv_guard, monkeypatch):
@@ -93,7 +107,6 @@ def test_main_upload_knot_posts_glb(tmp_path, argv_guard, monkeypatch):
     config, name, glb_bytes = show_mock.call_args[0]
     assert name == "rod"
     assert glb_bytes == b"glb-bytes"
-    assert config.viewer_server_type == "remote"
     assert config.viewer_remote_options["host"] == "testhost"
     assert config.viewer_remote_options["port"] == 42424
 

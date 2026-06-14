@@ -16,7 +16,7 @@ For the YAML keys referenced below, see the
 ## Three output modes (don't confuse them)
 
 The three outputs are independent and can be requested simultaneously
-(`--export model.stl --preview model.png --viewer embedded` is a valid
+(`--export model.stl --preview model.png --server` is a valid
 invocation). They are coordinated by `RenderPlan.from_config` in
 [render_pipeline.py:338](../src/led_knots/core/render_pipeline.py#L338) so
 the underlying tessellation work is shared rather than repeated.
@@ -25,7 +25,7 @@ the underlying tessellation work is shared rather than repeated.
 | --- | --- | --- | --- | --- |
 | CAD export | `--export PATH` | `.stl` / `.step` / `.stp` / `.3mf` / `.glb` / `.gltf` | `export.*` | `cq.exporters.export` and `Assembly.export` in [render_pipeline.py](../src/led_knots/core/render_pipeline.py#L486) |
 | Preview image | `--preview PATH` | `.png` (or `.jpg/.jpeg`) | `preview.*` | [src/led_knots/core/preview.py](../src/led_knots/core/preview.py) via trimesh + pyrender + Pillow |
-| Browser viewer | `--server` or `--viewer MODE` | live HTTP / WebSocket session | `server.*` (+ `preview.mesh_*` for tessellation) | `cadquery-web-viewer` driven from [render_pipeline.py:49](../src/led_knots/core/render_pipeline.py#L49) |
+| Browser viewer | `--server` | live HTTP session to remote cadquery-web-viewer | `server.*` | `cadquery-web-viewer` driven from [render_pipeline.py](../src/led_knots/core/render_pipeline.py) |
 | Simulation mesh (bonus) | `--output-mesh PATH` | `.obj` | `mesh.*` | trimesh load + decimate in [render_pipeline.py:170](../src/led_knots/core/render_pipeline.py#L170) |
 
 Pick by goal:
@@ -37,13 +37,12 @@ Pick by goal:
 - **You want a thumbnail for the README, a PR, or `scripts/generate_previews.py`**:
   use `--preview`. This always tessellates into RAM (or into the preview
   STL cache) and renders offscreen — no GUI, no server.
-- **You want to spin the model around in a browser**: use `--server` (YAML
-  default) or `--viewer {embedded,embedded-block,remote}`. Geometry is
-  tessellated to GLB and handed to `cadquery-web-viewer`.
+- **You want to spin the model around in a browser**: start
+  `cadquery-web-viewer`, then use `--server` on render or `upload-knot` on a
+  bundle. Geometry is tessellated to GLB and POSTed to the remote server.
 
 `RenderPlan` deduplicates work across these: if you ask for `--preview`
-plus `--viewer`, the GLB built for the viewer is also fed to the preview
-renderer; if you ask for `--preview` plus `--export model.stl`, the export
+plus `--server`, the bundle GLB is also fed to the preview renderer; if you ask for `--preview` plus `--export model.stl`, the export
 STL is reused as the preview source. See `preview_uses_export_stl` and
 `preview_from_glb` in [render_pipeline.py:312](../src/led_knots/core/render_pipeline.py#L312).
 
@@ -137,7 +136,7 @@ Relevant config keys (under `preview:` in `config.yaml`; parsed by
 
 ### The preview STL cache
 
-When `--preview` runs without `--viewer`, the pipeline writes the
+When `--preview` runs without `--server`, the pipeline writes the
 intermediate STL into `preview.stl_cache` and reuses it on subsequent
 runs whose inputs hash to the same key.
 
@@ -186,42 +185,25 @@ intermediate STL is written to a tempfile and deleted afterwards
 ## Browser viewer
 
 The interactive viewer is a wrapper around the third-party
-`cadquery-web-viewer` package. Two CLI flags reach it:
-
-- `--server` — enable the viewer using whatever `server.viewer.mode` is
-  set in `config.yaml` (default: `remote`).
-- `--viewer {off,embedded,embedded-block,remote}` — explicit override.
-  `off` disables the viewer regardless of YAML; the other three force
-  that mode.
+`cadquery-web-viewer` package. Use `--server` on `render-knot` / `render-part`
+to POST the bundle GLB after exports complete, or `upload-knot` on an existing
+bundle. Both paths require a separately running `cadquery-web-viewer` server.
 
 YAML lives under `server.viewer` and is parsed by `ViewerSettings`
-([config.py:365](../src/led_knots/core/config.py#L365)):
+([config.py:375](../src/led_knots/core/config.py#L375)):
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `server.viewer.mode` | `remote` | One of `off` / `embedded` / `remote`. Note: there is no YAML `embedded-block`; the blocking variant is selected by `embedded.block_until_disconnect` *or* the `--viewer embedded-block` CLI flag. |
-| `server.viewer.embedded.host` | `127.0.0.1` | Bind address for the in-process Flask server. |
-| `server.viewer.embedded.port` | `32323` | TCP port. |
-| `server.viewer.embedded.open_browser` | `true` | If true, opens the system browser to the viewer URL after the server starts. |
-| `server.viewer.embedded.wait_for_first_client` | `false` | If true, the CLI blocks until a browser connects (paired with a 120s `wait_for_client_timeout`, hardcoded at [config.py:623](../src/led_knots/core/config.py#L623)). |
-| `server.viewer.embedded.block_until_disconnect` | `false` | If true, the CLI stays alive until the last browser tab closes. Equivalent to `--viewer embedded-block`. |
-| `server.viewer.remote.host` | `localhost` | Host of a separately-running `cadquery-web-viewer` server. |
-| `server.viewer.remote.port` | `32323` | Port of that server. |
-| `server.viewer.remote.upload_timeout` | `300.0` s | HTTP upload timeout for the geometry POST. |
-| `server.viewer.remote.post_timeout` | `60.0` s | Per-request HTTP timeout. |
+| `server.viewer.host` | `localhost` | Host of the cadquery-web-viewer server. |
+| `server.viewer.port` | `32323` | Port of that server. |
+| `server.viewer.upload_timeout` | `300.0` s | HTTP upload timeout for the geometry POST. |
+| `server.viewer.post_timeout` | `60.0` s | Per-request HTTP timeout. |
+| `server.viewer.tessellation_tolerance` | `0.05` mm | Tessellation tolerance for uploads. |
+| `server.viewer.tessellation_angular_tolerance` | `0.1` rad | Angular tessellation tolerance for uploads. |
 
-### Embedded vs remote lifecycle
-
-| | Embedded (`embedded` / `embedded-block`) | Remote (`remote`) |
-| --- | --- | --- |
-| Server lifetime | In-process Flask in this Python interpreter | Pre-existing standalone `cadquery-web-viewer` server |
-| `cadquery-web-viewer` call | `show(..., server_type="in-process", server_options=...)` ([render_pipeline.py:79](../src/led_knots/core/render_pipeline.py#L79)) | `show(..., server_type="remote", remote_options=...)` ([render_pipeline.py:62](../src/led_knots/core/render_pipeline.py#L62)) |
-| Exit | Returns after POST unless `wait_for_first_client` or `block_until_disconnect` is set | Returns immediately after POST; if no `--output-mesh` follow-up work, the process exits via `sys.exit(0)` in `_exit_if_remote_viewer_idle` ([render_pipeline.py:158](../src/led_knots/core/render_pipeline.py#L158)) |
-| `wait_for_first_client` honored? | yes | no (irrelevant — the server is already running) |
-| `block_until_disconnect` honored? | yes — passed to `cadquery-web-viewer.show` | always `False` |
-
-For embedded mode the URL is logged on startup; for remote mode the
-pipeline only logs that geometry was posted to the configured host/port.
+Before uploading, the pipeline probes `http://{host}:{port}/api/scene` and
+exits with an error if the server is unreachable
+([render_pipeline.py:38](../src/led_knots/core/render_pipeline.py#L38)).
 
 ### Styling environment variables
 
@@ -246,12 +228,13 @@ existing env-var setting in your shell is preserved.
 
 ### Tessellation
 
-The browser viewer uses `preview.mesh_tolerance` and
-`preview.mesh_angular_tolerance` for its tessellation
+The browser viewer uses `server.viewer.tessellation_tolerance` and
+`server.viewer.tessellation_angular_tolerance` for uploads
 (`_viewer_tessellation_kwargs` at
-[render_pipeline.py:32](../src/led_knots/core/render_pipeline.py#L32))
-— the same settings as the preview image, not the (coarser) export
-settings.
+[render_pipeline.py:30](../src/led_knots/core/render_pipeline.py#L30)).
+When `--server` is set, the pipeline uploads the bundle GLB written by the
+export job when one is enabled; otherwise it builds GLB bytes via the standard
+CadQuery → STL → trimesh path.
 
 ## Multi-part assemblies
 
@@ -324,11 +307,10 @@ different look for the gallery than for your interactive work, edit
 ## Troubleshooting
 
 **Viewer logs `Posted ... to cadquery-web-viewer at http://localhost:32323/` and nothing happens.**
-You are in `remote` mode but no standalone `cadquery-web-viewer` server
-is running on that host/port. Either start one (`cadquery-web-viewer` in
-a separate terminal, then re-run your knot script), or switch to
-embedded with `--viewer embedded`. The `remote.post_timeout` (default 60
-s) controls how long the CLI waits before raising a connection error.
+No standalone `cadquery-web-viewer` server is running on that host/port.
+Start one in a separate terminal (`cadquery-web-viewer --host localhost --port 32323`),
+then re-run with `--server` or `upload-knot`. The `post_timeout` setting
+(default 60 s) controls how long the CLI waits before raising a connection error.
 
 **Preview image looks blocky / faceted on curved tubes.**
 `preview.mesh_tolerance` and `preview.mesh_angular_tolerance` are too

@@ -240,14 +240,14 @@ Configuration is a layered YAML + CLI structure exposed through
    that knot modules use as `config.tube_settings.<key>` without having to know
    which face type they were called with.
 7. Applies per-flag CLI overrides (`--name`, `--renders-dir`, `--disable-export`,
-   `--viewer`, `--optimize` / `--no-optimize`, `--auto-orient`,
+   `--server`, `--optimize` / `--no-optimize`, `--auto-orient`,
    `--optimize-report-dir`) on top of the merged YAML.
 
 The returned `Config` exposes substructures used throughout the pipeline:
 `output_bounds`, `tube_settings`, `path_settings`, `max_print_bounds`,
 `tube_gap`, `clamp`, `print_optimization`, `server_settings`, `export`, `mesh`,
 `preview_settings`, plus CLI-derived attributes like `viewer_enabled`,
-`viewer_server_type`, `preview_filepath`, `export_parts`. Every documented key
+`viewer_remote_options`, `preview_filepath`, `export_parts`. Every documented key
 is enumerated in the [configuration reference](configuration.md).
 
 ## Extension surfaces
@@ -290,10 +290,8 @@ script.
 - **Preview PNG** — set `--preview <file.png>` (or `config.preview_filepath`).
   Renders the active part via trimesh + pyrender at the camera angles defined
   in `preview.*`. See the [preview / images doc](rendering-and-preview.md).
-- **Web viewer** — `--viewer embedded | embedded-block | remote` (or
-  `--server`). Tessellates to GLB and either runs an in-process
-  `cadquery-web-viewer` server or POSTs to a running remote one. Per-part
-  colouring is applied for assemblies via
+- **Web viewer** — `--server` POSTs tessellated geometry to a running remote
+  `cadquery-web-viewer` server. Per-part colouring is applied for assemblies via
   [color_palette.py](../src/led_knots/core/color_palette.py). See the
   [viewer doc](rendering-and-preview.md).
 - **Simulation mesh export** — `--output-mesh out.obj` (or `config.mesh.*`).
@@ -337,8 +335,8 @@ what makes stack traces much easier to read.
   [drain_holes.py](../src/led_knots/optimize/drain_holes.py) to drill drain
   holes through trapped resin cavities.
 - **[cadquery-web-viewer](https://github.com/CadQuery/cadquery-web-viewer)**
-  (`cadquery-web-viewer>=2.0.0`) — the interactive browser viewer. The
-  `--viewer` modes drive its `show` / `render` APIs from
+  (`cadquery-web-viewer>=2.0.0`) — the interactive browser viewer. `--server`
+  and `upload-knot` POST to a remote server via `show()` from
   [render_pipeline.py](../src/led_knots/core/render_pipeline.py).
 - **numpy / numba / matplotlib / rtree** — numerical helpers used in twist
   optimisation ([path_utils.py](../src/led_knots/core/path_utils.py)),

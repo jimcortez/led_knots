@@ -19,7 +19,7 @@ import cadquery as cq
 import trimesh
 import yaml
 
-from .config import Config, RenderingExportJob
+from .config import Config, RenderingExportJob, resolve_filename_template
 from .preview import render_glb_to_image
 from .render_bundle import RenderBundle
 from .render_planner import ExportJob, RenderPlanner
@@ -36,7 +36,7 @@ def _viewer_tessellation_kwargs(config) -> Dict[str, float]:
 
 
 def _ensure_remote_viewer_reachable(config) -> None:
-    if config.viewer_server_type != "remote":
+    if not config.viewer_enabled:
         return
     import httpx
 
@@ -61,52 +61,25 @@ def _ensure_remote_viewer_reachable(config) -> None:
         sys.exit(1)
 
 
-def _glb_bytes_via_viewer_render(obj, config, name: str) -> bytes:
-    from cadquery_web_viewer import render
-
-    tess_kw = _viewer_tessellation_kwargs(config)
-    glbs = render(obj, names=name, **tess_kw)
-    return glbs[0]
-
-
 def _cadquery_web_viewer_show(config, names: Union[str, List[str], None], *objs) -> None:
     from cadquery_web_viewer import show
 
     tess_kw = _viewer_tessellation_kwargs(config)
-    st = config.viewer_server_type
-    block = bool(config.viewer_block_until_disconnect)
+    ro = config.viewer_remote_options or {}
     label = names if isinstance(names, str) else ", ".join(names or [])
-    if st == "remote":
-        ro = config.viewer_remote_options or {}
-        show(
-            *objs,
-            names=names,
-            server_type="remote",
-            remote_options=ro,
-            block_until_disconnect=False,
-            **tess_kw,
-        )
-        logger.info(
-            "Posted %s to cadquery-web-viewer at http://%s:%s/",
-            label,
-            ro.get("host", "localhost"),
-            ro.get("port", 32323),
-        )
-        return
-    so = config.viewer_server_options or {}
     show(
         *objs,
         names=names,
-        server_type="in-process",
-        server_options=so,
-        block_until_disconnect=block,
+        server_type="remote",
+        remote_options=ro,
+        block_until_disconnect=False,
         **tess_kw,
     )
     logger.info(
-        "cadquery-web-viewer (%s): http://%s:%s/",
+        "Posted %s to cadquery-web-viewer at http://%s:%s/",
         label,
-        so.get("host", "127.0.0.1"),
-        so.get("port", 32323),
+        ro.get("host", "localhost"),
+        ro.get("port", 32323),
     )
 
 
@@ -118,34 +91,18 @@ def _cadquery_web_viewer_show_colored_parts(
     from cadquery_web_viewer import show
 
     tess_kw = _viewer_tessellation_kwargs(config)
-    st = config.viewer_server_type
-    block = bool(config.viewer_block_until_disconnect)
+    ro = config.viewer_remote_options or {}
     for idx, (part_name, shape) in enumerate(zip(names, colored)):
-        kw = {
+        show(
+            shape,
+            names=part_name,
+            server_type="remote",
+            remote_options=ro,
+            block_until_disconnect=False,
+            color_faces=shape.color,
+            auto_clear=idx == 0,
             **tess_kw,
-            "color_faces": shape.color,
-            "auto_clear": idx == 0,
-        }
-        if st == "remote":
-            ro = config.viewer_remote_options or {}
-            show(
-                shape,
-                names=part_name,
-                server_type="remote",
-                remote_options=ro,
-                block_until_disconnect=False,
-                **kw,
-            )
-        else:
-            so = config.viewer_server_options or {}
-            show(
-                shape,
-                names=part_name,
-                server_type="in-process",
-                server_options=so,
-                block_until_disconnect=block and idx == len(colored) - 1,
-                **kw,
-            )
+        )
 
 
 def _assembly_to_glb_bytes(assy: cq.Assembly, *, tolerance: float, angular: float) -> bytes:
@@ -327,15 +284,11 @@ class PartArtifacts:
         self.stl_written_path = dest
         return dest
 
-    def ensure_glb_bytes(self, *, for_viewer: bool = False) -> bytes:
+    def ensure_glb_bytes(self) -> bytes:
         if self.glb_bytes is not None:
             return self.glb_bytes
         tol, ang = self._tolerances()
-        if for_viewer and self.config.viewer_enabled:
-            self.glb_bytes = _glb_bytes_via_viewer_render(
-                self.solid, self.config, self.config.name or "Knot"
-            )
-        elif self.is_assembly and self.assy is not None:
+        if self.is_assembly and self.assy is not None:
             self.glb_bytes = _assembly_to_glb_bytes(self.assy, tolerance=tol, angular=ang)
         else:
             stl_job = next((j for j in self.config.rendering.exports if j.format == "stl"), None)
@@ -347,6 +300,19 @@ class PartArtifacts:
                 stl_ascii=stl_ascii,
             )
         return self.glb_bytes
+
+    def _bundle_glb_path(self) -> Optional[Path]:
+        glb_job = next(
+            (j for j in self.config.rendering.exports if j.format == "glb" and j.enabled),
+            None,
+        )
+        if glb_job is None:
+            return None
+        return self.config.render_bundle_dir / resolve_filename_template(
+            glb_job.filename_template,
+            bundle_stem=self.config.render_bundle_stem,
+            run_name=self.config.run_name,
+        )
 
     def _preview_settings_for_job(self, job: ExportJob) -> RenderingExportJob:
         project_root = Path(__file__).resolve().parent.parent.parent.parent
@@ -468,7 +434,11 @@ class PartArtifacts:
                 part_names, colored = colored_assembly_shapes(self.assy, base_rgb)
                 _cadquery_web_viewer_show_colored_parts(self.config, part_names, colored)
                 return
-        glb = self.ensure_glb_bytes(for_viewer=True)
+        glb_path = self._bundle_glb_path()
+        if glb_path is not None and glb_path.is_file():
+            glb = glb_path.read_bytes()
+        else:
+            glb = self.ensure_glb_bytes()
         _cadquery_web_viewer_show(self.config, name, glb)
 
 
@@ -526,9 +496,8 @@ def deliver_part(
 
 
 def upload_glb_to_viewer(glb_bytes: bytes, config: Config, name: str) -> None:
-    """Post GLB bytes to cadquery-web-viewer using ``config`` viewer settings."""
-    if config.viewer_server_type == "remote":
-        _ensure_remote_viewer_reachable(config)
+    """Post GLB bytes to remote cadquery-web-viewer using ``config`` viewer settings."""
+    _ensure_remote_viewer_reachable(config)
     _cadquery_web_viewer_show(config, name, glb_bytes)
 
 

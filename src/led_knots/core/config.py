@@ -373,36 +373,29 @@ class TubeSettings:
 
 
 class ViewerSettings:
-    """cadquery-web-viewer options from ``server.viewer`` in YAML."""
-
-    _VALID_MODES = frozenset({'off', 'embedded', 'remote'})
+    """Remote cadquery-web-viewer connection options from ``server.viewer`` in YAML."""
 
     def __init__(self, data: Dict[str, Any]):
         d = data or {}
-        mode = str(d.get('mode', 'remote')).strip().lower()
-        if mode not in self._VALID_MODES:
-            raise ValueError(
-                "server.viewer.mode must be one of %r (got %r)"
-                % (sorted(self._VALID_MODES), mode)
-            )
-        self.mode = mode
-        emb = d.get('embedded') or {}
-        self.embedded_host = str(emb.get('host', '127.0.0.1'))
-        self.embedded_port = int(emb.get('port', 32323))
-        self.embedded_open_browser = bool(emb.get('open_browser', True))
-        self.embedded_wait_for_first_client = bool(emb.get('wait_for_first_client', False))
-        self.embedded_block_until_disconnect = bool(emb.get('block_until_disconnect', False))
         rem = d.get('remote') or {}
-        self.remote_host = str(rem.get('host', 'localhost'))
-        self.remote_port = int(rem.get('port', 32323))
-        ut = rem.get('upload_timeout')
-        self.remote_upload_timeout = float(ut) if ut is not None else 300.0
-        pt = rem.get('post_timeout')
-        self.remote_post_timeout = float(pt) if pt is not None else 60.0
+        self.host = str(d.get('host', rem.get('host', 'localhost')))
+        self.port = int(d.get('port', rem.get('port', 32323)))
+        ut = d.get('upload_timeout', rem.get('upload_timeout'))
+        self.upload_timeout = float(ut) if ut is not None else 300.0
+        pt = d.get('post_timeout', rem.get('post_timeout'))
+        self.post_timeout = float(pt) if pt is not None else 60.0
         self.tessellation_tolerance = float(d.get('tessellation_tolerance', 0.05))
         self.tessellation_angular_tolerance = float(
             d.get('tessellation_angular_tolerance', 0.1)
         )
+
+    def remote_options(self) -> Dict[str, Any]:
+        return {
+            'host': self.host,
+            'port': self.port,
+            'upload_timeout': self.upload_timeout,
+            'post_timeout': self.post_timeout,
+        }
 
 
 class ServerSettings:
@@ -747,8 +740,6 @@ class Config:
         self.render_bundle_dir = Path.cwd() / self.rendering.output_dir / self.render_bundle_stem
         self.render_stats = None
 
-        # Store other command line arguments as properties
-        self.server = args.server
         self._init_viewer_from_args(args)
 
         # CLI overrides for the print-optimization stage. --auto-orient
@@ -766,97 +757,17 @@ class Config:
         self.optimize_report_dir = cli_report_dir
 
     def _init_viewer_from_args(self, args) -> None:
-        """
-        Resolve cadquery-web-viewer usage from ``--viewer`` / ``--server`` and YAML ``server.viewer``.
-        Sets: viewer_enabled, viewer_server_type, viewer_block_until_disconnect,
-        viewer_server_options, viewer_remote_options.
-        """
-        v = getattr(args, 'viewer', None)
-        vs = self.server_settings.viewer
-
-        if v == 'off':
-            self.viewer_enabled = False
-        elif v in ('embedded', 'embedded-block', 'remote'):
-            self.viewer_enabled = True
-        elif bool(getattr(args, 'server', False)):
-            self.viewer_enabled = True
+        """Set viewer_enabled and viewer_remote_options from ``--server``."""
+        self.viewer_enabled = bool(getattr(args, 'server', False))
+        if self.viewer_enabled:
+            self.viewer_remote_options = self.server_settings.viewer.remote_options()
         else:
-            self.viewer_enabled = False
-
-        if not self.viewer_enabled:
-            self.viewer_server_type: Optional[str] = None
-            self.viewer_block_until_disconnect = False
-            self.viewer_server_options = None
-            self.viewer_remote_options = None
-            return
-
-        if v in ('embedded', 'embedded-block'):
-            yaml_mode = 'embedded'
-            block = v == 'embedded-block'
-        elif v == 'remote':
-            yaml_mode = 'remote'
-            block = False
-        else:
-            # ``--server`` with no ``--viewer`` (or future defaults): YAML ``server.viewer.mode``
-            yaml_mode = vs.mode if vs.mode != 'off' else 'embedded'
-            block = yaml_mode == 'embedded' and vs.embedded_block_until_disconnect
-
-        if yaml_mode == 'remote':
-            self.viewer_server_type = 'remote'
-            self.viewer_block_until_disconnect = False
-            self.viewer_server_options = None
-            self.viewer_remote_options = {
-                'host': vs.remote_host,
-                'port': vs.remote_port,
-                'upload_timeout': vs.remote_upload_timeout,
-                'post_timeout': vs.remote_post_timeout,
-            }
-        else:
-            self.viewer_server_type = 'in-process'
-            self.viewer_block_until_disconnect = block
-            self.viewer_server_options = {
-                'host': vs.embedded_host,
-                'port': vs.embedded_port,
-                'open_browser': vs.embedded_open_browser,
-                'wait_for_first_client': vs.embedded_wait_for_first_client,
-                'wait_for_client_timeout': 120.0,
-            }
             self.viewer_remote_options = None
 
     def apply_viewer_from_yaml(self) -> None:
-        """
-        Enable cadquery-web-viewer upload using ``server.viewer`` from merged config.
-
-        Used by ``upload-knot`` (no CLI viewer flags). If ``server.viewer.mode`` is
-        ``off``, embedded mode is used so upload can proceed.
-        """
-        vs = self.server_settings.viewer
+        """Enable remote cadquery-web-viewer upload from ``server.viewer`` (upload-knot)."""
         self.viewer_enabled = True
-
-        yaml_mode = vs.mode if vs.mode != "off" else "embedded"
-        block = yaml_mode == "embedded" and vs.embedded_block_until_disconnect
-
-        if yaml_mode == "remote":
-            self.viewer_server_type = "remote"
-            self.viewer_block_until_disconnect = False
-            self.viewer_server_options = None
-            self.viewer_remote_options = {
-                "host": vs.remote_host,
-                "port": vs.remote_port,
-                "upload_timeout": vs.remote_upload_timeout,
-                "post_timeout": vs.remote_post_timeout,
-            }
-        else:
-            self.viewer_server_type = "in-process"
-            self.viewer_block_until_disconnect = block
-            self.viewer_server_options = {
-                "host": vs.embedded_host,
-                "port": vs.embedded_port,
-                "open_browser": vs.embedded_open_browser,
-                "wait_for_first_client": vs.embedded_wait_for_first_client,
-                "wait_for_client_timeout": 120.0,
-            }
-            self.viewer_remote_options = None
+        self.viewer_remote_options = self.server_settings.viewer.remote_options()
 
     @staticmethod
     def _merge_dicts(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:

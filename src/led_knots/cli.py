@@ -79,7 +79,6 @@ def main_upload_knot() -> None:
         renders_dir=None,
         disable_export=None,
         server=False,
-        viewer=None,
         verbose=args.verbose,
         optimize=None,
         auto_orient=False,

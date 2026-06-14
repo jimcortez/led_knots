@@ -269,11 +269,8 @@ explicit handling:
   you add another optimizer that needs a boolean engine.
 - **`cadquery-web-viewer`** ([pyproject.toml:31](../pyproject.toml#L31),
   sourced editable from a sibling repo via
-  [`[tool.uv.sources]`](../pyproject.toml#L61)) — powers the `--viewer
-  embedded`, `--viewer embedded-block`, and `--viewer remote` modes
-  declared in [utils.py:58](../src/led_knots/core/utils.py#L58). If the
-  package isn't importable, all four viewer modes should fall back to
-  `off` rather than crashing the model build.
+  [`[tool.uv.sources]`](../pyproject.toml#L61)) — powers `--server` and
+  `upload-knot` remote uploads declared in [utils.py:56](../src/led_knots/core/utils.py#L56).
 - **`pyknotid`** ([pyproject.toml:27](../pyproject.toml#L27), sourced from
   GitHub via `[tool.uv.sources]`) — the source of truth for mathematical
   knot parameterizations (used by `trefoil`, `figure_8`, `k4_1`, `k8_21`,

@@ -68,7 +68,7 @@ Defined by [`Config.__init__`](../src/led_knots/core/config.py#L491) and
    `--renders-dir`), disabled export formats (from `--disable-export`),
    `print_optimization.enabled` (from `--optimize` / `--no-optimize` /
    `--auto-orient`), `print_optimization.orientation.auto_apply` (from
-   `--auto-orient`), and viewer mode (from `--viewer` / `--server`).
+   `--auto-orient`), and remote viewer upload (from `--server`).
 
 ## Section-by-section reference
 
@@ -449,16 +449,12 @@ server:
   # color_edges: "#1a1aff"
   # color_vertices: "#1a1a1a"
   viewer:
-    mode: remote
-    embedded:
-      host: 127.0.0.1
-      port: 32323
-      open_browser: true
-      wait_for_first_client: false
-      block_until_disconnect: false
-    remote:
-      host: localhost
-      port: 32323
+    host: localhost
+    port: 32323
+    upload_timeout: 300.0
+    post_timeout: 60.0
+    tessellation_tolerance: 0.05
+    tessellation_angular_tolerance: 0.1
 ```
 
 Top-level styling keys (any non-`None` value is exported to the
@@ -474,32 +470,19 @@ environment by [`ServerSettings.apply_to_env`](../src/led_knots/core/config.py#L
 
 #### `server.viewer`
 
-| Key | Type | Default | Units | Description |
-| --- | --- | --- | --- | --- |
-| `server.viewer.mode` | string enum | `remote` | — | `off`, `embedded`, or `remote`. Anything else raises `ValueError`. |
-
-#### `server.viewer.embedded`
-
-Used when an in-process viewer is launched (e.g. `--viewer embedded`).
+Remote cadquery-web-viewer connection (used by `--server` and `upload-knot`).
 
 | Key | Type | Default | Units | Description |
 | --- | --- | --- | --- | --- |
-| `server.viewer.embedded.host` | string | `127.0.0.1` | — | Bind address. |
-| `server.viewer.embedded.port` | int | 32323 | — | Listen port. |
-| `server.viewer.embedded.open_browser` | bool | `true` | — | Launch a browser tab when the server starts. |
-| `server.viewer.embedded.wait_for_first_client` | bool | `false` | — | Block until at least one client connects before pushing the part. |
-| `server.viewer.embedded.block_until_disconnect` | bool | `false` | — | Keep the script alive until the client disconnects. |
+| `server.viewer.host` | string | `localhost` | — | Viewer host. |
+| `server.viewer.port` | int | 32323 | — | Viewer port. |
+| `server.viewer.upload_timeout` | float | 300.0 | s | HTTP upload timeout. |
+| `server.viewer.post_timeout` | float | 60.0 | s | HTTP POST timeout for control messages. |
+| `server.viewer.tessellation_tolerance` | float | 0.05 | mm | Tessellation tolerance for `--server` uploads. |
+| `server.viewer.tessellation_angular_tolerance` | float | 0.1 | rad | Angular tessellation tolerance for uploads. |
 
-#### `server.viewer.remote`
-
-Used when posting to a running `cadquery-web-viewer` (e.g. `--viewer remote`).
-
-| Key | Type | Default | Units | Description |
-| --- | --- | --- | --- | --- |
-| `server.viewer.remote.host` | string | `localhost` | — | Viewer host. |
-| `server.viewer.remote.port` | int | 32323 | — | Viewer port. |
-| `server.viewer.remote.upload_timeout` | float | 300.0 | s | HTTP upload timeout. |
-| `server.viewer.remote.post_timeout` | float | 60.0 | s | HTTP POST timeout for control messages. |
+Legacy nested `server.viewer.remote.*` keys are still read as fallbacks when
+top-level `host` / `port` / timeout keys are omitted.
 
 ### `export`
 

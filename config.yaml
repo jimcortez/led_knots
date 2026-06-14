@@ -212,18 +212,11 @@ server:
   # color_edges: "#1a1aff"
   # color_vertices: "#1a1a1a"
   viewer:
-    mode: remote
-    # off | embedded | remote — remote: POST to a running `cadquery-web-viewer` server
-    embedded:
-      host: 127.0.0.1
-      port: 32323
-      open_browser: true
-      wait_for_first_client: false
-      block_until_disconnect: false
-    remote:
-      host: localhost
-      port: 32323
-    # Tessellation for --server / --viewer (coarser than preview.mesh_tolerance for speed)
+    host: localhost
+    port: 32323
+    upload_timeout: 300.0
+    post_timeout: 60.0
+    # Tessellation for --server uploads (coarser than preview.mesh_tolerance for speed)
     tessellation_tolerance: 0.05       # mm
     tessellation_angular_tolerance: 0.1 # rad
 

@@ -104,7 +104,7 @@ See [CLI reference](cli-reference.md) and [Mesh export](mesh-export.md).
 
 ### 2. Browser preview against a long-running viewer
 
-The default `server.viewer.mode` in [config.yaml](../config.yaml#L193) is `remote`, meaning each knot run POSTs the model to a separately-launched `cadquery-web-viewer` instance. In one terminal:
+Start cadquery-web-viewer in one terminal ([config.yaml](../config.yaml) `server.viewer.host` / `port`):
 
 ```bash
 cadquery-web-viewer --host localhost --port 32323
@@ -116,13 +116,7 @@ In another terminal:
 render-knot knot_configs/my_trefoil.yaml --server
 ```
 
-The CLI uploads the model and exits immediately; the viewer holds the browser tab. You can override the mode per-run with `--viewer remote` (same effect) or switch to in-process mode:
-
-```bash
-render-knot knot_configs/my_trefoil.yaml --viewer embedded
-```
-
-`embedded` starts a Flask thread inside the CLI process and opens a browser tab; `embedded-block` is the "wait until the browser disconnects" variant.
+The CLI uploads the model and exits immediately; the viewer holds the browser tab. You can also upload an existing bundle with `upload-knot renders/my_bundle/`.
 
 ### 3. Preview PNG in the render bundle
 

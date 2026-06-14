@@ -98,9 +98,8 @@ upload-knot renders/rod_20260612-152817 -v
   must contain `{stem}.glb` where `{stem}` matches the directory name.
 - **Viewer settings:** Always taken from `server.viewer` in the bundle YAML snapshot
   (merged with `config.yaml` / `config.local.yaml`). When the bundle YAML is missing,
-  repo defaults apply. No `--viewer` or `--server` flags on this command.
-- **Prerequisite:** For `server.viewer.mode: remote` (the default in `config.yaml`),
-  start cadquery-web-viewer in another terminal first:
+  repo defaults apply. No `--server` flag on this command.
+- **Prerequisite:** Start cadquery-web-viewer in another terminal first:
 
 ```bash
 cadquery-web-viewer --host localhost --port 32323
@@ -130,19 +129,12 @@ See [Configuration](configuration.md) for layering rules and worked examples.
 
 ### `--server`
 
-- **Effect:** Legacy alias to enable browser preview using `server.viewer` from
-  `config.yaml`. Prefer `--viewer`.
-
-### `--viewer MODE`
-
-- **Choices:** `off`, `embedded`, `embedded-block`, `remote`.
-- **Effect:** Overrides `server.viewer.mode` when set.
+- **Effect:** POST the model to a running remote cadquery-web-viewer after
+  writing the render bundle. Connection settings come from `server.viewer` in
+  config.
 
 ```bash
-render-knot knot_configs/test_short_rod_led_tube.yaml --viewer embedded
-render-knot knot_configs/test_short_rod_led_tube.yaml --viewer embedded-block
-render-knot knot_configs/test_short_rod_led_tube.yaml --viewer remote
-render-knot knot_configs/test_short_rod_led_tube.yaml --viewer off
+render-knot knot_configs/test_short_rod_led_tube.yaml --server
 ```
 
 ### `--optimize` / `--no-optimize`
