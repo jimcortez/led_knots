@@ -31,7 +31,7 @@ Straight vertical pipe.
 ![Rod](../assets/rod.png)
 
 ```bash
-render-knot knot_configs/test_short_rod_led_tube.yaml
+render-knot knot_configs/rod.yaml
 ```
 
 ---
