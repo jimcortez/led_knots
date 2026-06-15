@@ -1,0 +1,22 @@
+name: quarter_turn_braided
+knot_type: quarter_turn
+face_type: braided_rope_tube
+
+output_bounds:
+  # Elegoo Saturn 4 Ultra 16k build volume
+  width: 200    # mm
+  length: 110   # mm
+  height: 100     # mm
+
+face_settings:
+  # Braided-rope sleeve along the path (Step 4).
+  braided_rope_tube:
+    braided_rope:
+      num_strands_per_dir: 75
+      # 150 strands is impractically slow to fuse as B-rep (OCC booleans scale
+      # ~quadratically with the growing accumulator). The mesh path unions
+      # watertight strand meshes via manifold: fast and memory-bounded. Output
+      # is a watertight mesh (STL/GLB/preview), so STEP and SLA-optimize are
+      # unavailable for this config; switch to fuse_method: brep if you need them
+      # (at a lower strand count).
+      fuse_method: mesh
