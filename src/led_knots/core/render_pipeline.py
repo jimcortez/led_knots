@@ -220,7 +220,9 @@ class PartArtifacts:
         self.face_kwargs = face_kwargs or {}
         self._solid: Optional[Any] = None
         self._assy: Optional[cq.Assembly] = None
+        self._mesh: Optional[trimesh.Trimesh] = None
         self._is_assembly = False
+        self._is_mesh = False
         self._normalized = False
         self.stl_written_path: Optional[Path] = None
         self.glb_bytes: Optional[bytes] = None
@@ -229,9 +231,13 @@ class PartArtifacts:
         if self._normalized:
             return
         self._is_assembly = isinstance(self.part, cq.Assembly)
+        self._is_mesh = isinstance(self.part, trimesh.Trimesh)
         if self._is_assembly:
             self._assy = self.part
             self._solid = self._assy.toCompound()
+        elif self._is_mesh:
+            self._mesh = self.part
+            self._solid = None
         elif isinstance(self.part, (cq.Solid, cq.Compound)):
             self._solid = self.part
         elif hasattr(self.part, "val"):
@@ -255,6 +261,16 @@ class PartArtifacts:
         self._normalize()
         return self._is_assembly
 
+    @property
+    def is_mesh(self) -> bool:
+        self._normalize()
+        return self._is_mesh
+
+    @property
+    def mesh(self) -> Optional["trimesh.Trimesh"]:
+        self._normalize()
+        return self._mesh
+
     def _tolerances(self) -> tuple[float, float]:
         r = self.config.rendering
         return float(r.tolerance), float(r.angular_tolerance)
@@ -268,6 +284,9 @@ class PartArtifacts:
         ascii: bool = False,
     ) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
+        if self.is_mesh:
+            self.mesh.export(str(dest), file_type="stl_ascii" if ascii else "stl")
+            return
         cq.exporters.export(
             self.solid,
             str(dest),
@@ -286,6 +305,9 @@ class PartArtifacts:
 
     def ensure_glb_bytes(self) -> bytes:
         if self.glb_bytes is not None:
+            return self.glb_bytes
+        if self.is_mesh and self.mesh is not None:
+            self.glb_bytes = self.mesh.export(file_type="glb")
             return self.glb_bytes
         tol, ang = self._tolerances()
         if self.is_assembly and self.assy is not None:
@@ -354,6 +376,12 @@ class PartArtifacts:
             return
 
         if job.format == "step":
+            if self.is_mesh:
+                raise RuntimeError(
+                    "STEP export requires a B-rep solid, but braided_rope "
+                    "fuse_method='mesh' produced a mesh. Use fuse_method='brep' "
+                    "or disable the STEP export."
+                )
             if self.is_assembly and self.assy is not None:
                 self.assy.export(
                     str(path),
@@ -484,6 +512,13 @@ def deliver_part(
     finalize_render_log(plan.bundle_dir / f"{config.render_bundle_stem}.log")
     ctx = PartArtifacts(part, config, path=path, aux=aux, face_kwargs=face_kwargs)
     ctx._normalize()
+
+    if getattr(ctx, "is_mesh", False) and getattr(plan, "needs_step_export", False):
+        raise RuntimeError(
+            "STEP export requires a B-rep solid, but braided_rope "
+            "fuse_method='mesh' produced a mesh. Use fuse_method='brep' "
+            "or disable the STEP export."
+        )
 
     for job in plan.execution_order:
         ctx.execute_job(job)

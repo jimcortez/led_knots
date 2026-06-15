@@ -191,6 +191,18 @@ def render_part(
     )
 
 
+def _braid_mesh_fuse_selected(config) -> bool:
+    """True when the active braided-rope face is configured for the mesh fuse path.
+
+    The mesh path returns a ``trimesh.Trimesh`` (not a B-rep solid), so callers
+    use this to gate B-rep-only stages (segmentation, optimize, STEP).
+    """
+    if config.tube_settings.face_type not in ("braided_rope", "braided_rope_tube"):
+        return False
+    raw = getattr(config.tube_settings, "braided_rope", None) or {}
+    return str(raw.get("fuse_method", "brep")).lower() == "mesh"
+
+
 def build_tube_from_path(path, config, aux=None, face_kwargs: Optional[dict] = None):
     """
     Build the 3D tube geometry for `path` using the configured tube model.
@@ -252,6 +264,12 @@ def draw_part(path, config, aux=None, **face_kwargs):
 
     face_kwargs_dict = face_kwargs or {}
 
+    if _braid_mesh_fuse_selected(config) and config.max_print_bounds.enabled:
+        raise RuntimeError(
+            "braided_rope fuse_method='mesh' is incompatible with print "
+            "segmentation (max_print_bounds.enabled); use fuse_method='brep'."
+        )
+
     with config.render_stats.record_stage("draw_part.sweep"):
         if config.max_print_bounds.enabled:
             result = build_segmented_tube_assembly(
@@ -264,7 +282,16 @@ def draw_part(path, config, aux=None, **face_kwargs):
         else:
             result = build_tube_from_path(path, config, aux=aux, face_kwargs=face_kwargs_dict)
 
-    if not isinstance(result, cq.Assembly):
+    import trimesh
+
+    if isinstance(result, trimesh.Trimesh):
+        if config.print_optimization.enabled:
+            raise RuntimeError(
+                "braided_rope fuse_method='mesh' produces a mesh, which the SLA "
+                "print-optimization stage cannot process. Use fuse_method='brep' "
+                "or disable --optimize / print_optimization."
+            )
+    elif not isinstance(result, cq.Assembly):
         from .fuse_utils import fuse_part_solids
 
         result = fuse_part_solids(result, name=config.name or "part")

@@ -79,6 +79,10 @@ face_settings:
       strand_start: 2.0              # mm – trim from path start
       strand_end_offset: 2.0         # mm – trim from path end
       valley_embed_depth: 0.5        # mm – swept-base only: braid valleys sink into tube OD
+      fuse_method: brep              # brep (single fused Solid; keeps STEP/optimize) | mesh (fast manifold union; mesh-only output)
+      fuse_batch_size: 12            # strands fused/unioned per batch; lower = less peak RAM, more boolean calls
+      mesh_tolerance: 0.05           # mesh only: per-strand tessellation tol (mm); coarser than render tol to bound face count
+      mesh_angular_tolerance: 0.3    # mesh only: per-strand angular tessellation tol (rad)
 
   # Braided-rope sleeve on an LED tube (inner wire hole + connectors).
   braided_rope_tube:
@@ -97,6 +101,10 @@ face_settings:
       strand_start: 2.0
       strand_end_offset: 2.0
       valley_embed_depth: 0.5        # mm – braid valleys sink into tube OD for controlled fusion
+      fuse_method: brep              # brep (single fused Solid; keeps STEP/optimize) | mesh (fast manifold union; mesh-only output)
+      fuse_batch_size: 12            # strands fused/unioned per batch; lower = less peak RAM, more boolean calls
+      mesh_tolerance: 0.05           # mesh only: per-strand tessellation tol (mm); coarser than render tol to bound face count
+      mesh_angular_tolerance: 0.3    # mesh only: per-strand angular tessellation tol (rad)
 
 # -----------------------------------------------------------------------------
 # Path / twist limits

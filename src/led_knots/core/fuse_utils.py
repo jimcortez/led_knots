@@ -10,6 +10,7 @@ disconnected lumps.
 
 from __future__ import annotations
 
+import gc
 import logging
 import sys
 from typing import Union
@@ -29,7 +30,32 @@ def _solid_count(shape) -> int:
     return 1
 
 
-def _fuse_solids_map_reduce(solids: list, *, name: str):
+def _release() -> None:
+    """Drop refs that OCC keeps alive via Python wrappers.
+
+    Boolean fuse/clean leave large intermediate B-rep shapes referenced until
+    Python collects their wrappers; calling this after releasing a batch keeps
+    peak memory bounded when fusing hundreds of solids (e.g. braid strands).
+    """
+    gc.collect()
+
+
+def _assert_single_solid(shape, *, name: str) -> None:
+    """Raise if a fused result is not exactly one connected solid.
+
+    A multi-lump result means the inputs did not actually touch, so the fuse
+    produced disconnected geometry that would export as a single STL while
+    physically being several pieces. Fail loudly rather than ship that.
+    """
+    remaining = _solid_count(shape)
+    if remaining > 1:
+        raise RuntimeError(
+            f"{name}: {remaining} physically separate lumps remain after fuse "
+            "(solids do not touch)"
+        )
+
+
+def _fuse_solids_map_reduce(solids: list, *, name: str, show_progress: bool = True):
     """
     Fuse many solids in map-reduce rounds: pair neighbors, then pair results.
 
@@ -37,6 +63,9 @@ def _fuse_solids_map_reduce(solids: list, *, name: str):
     smaller bodies of nearly equal volume (e.g. braid strands). Pair
     ``solids[1:]`` so those smaller bodies merge together first; the lead
     solid is fused last (carried forward when a round has an odd count).
+
+    ``show_progress=False`` suppresses the per-merge bar; streaming callers that
+    fuse many small batches drive their own outer progress bar instead.
     """
     current = solids[1:] + [solids[0]]
     n = len(current)
@@ -44,7 +73,7 @@ def _fuse_solids_map_reduce(solids: list, *, name: str):
         total=n - 1,
         desc=f"Fusing solids for {name}",
         unit="merge",
-        disable=not sys.stderr.isatty(),
+        disable=show_progress is False or not sys.stderr.isatty(),
     )
     try:
         while len(current) > 1:
@@ -95,17 +124,12 @@ def fuse_part_solids(part: _PartT, *, name: str = "part") -> _PartT:
     logger.info("Fusing %d solids into one body for %s...", n, name)
     merged = _fuse_solids_map_reduce(solids, name=name)
 
-    remaining = _solid_count(merged)
     logger.info(
         "Fuse complete for %s: %d solid(s) remaining.",
         name,
-        remaining,
+        _solid_count(merged),
     )
-    if remaining > 1:
-        raise RuntimeError(
-            f"{name}: {remaining} physically separate lumps remain after fuse "
-            "(solids do not touch)"
-        )
+    _assert_single_solid(merged, name=name)
 
     if wrapper is not None:
         return wrapper.newObject([merged])

@@ -61,6 +61,9 @@ cadquery-web-viewer = { path = "../yet-another-cad-viewer", editable = true }
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
 
 [dependency-groups]
 dev = [

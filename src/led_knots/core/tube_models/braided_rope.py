@@ -15,15 +15,17 @@ from __future__ import annotations
 import logging
 import math
 import sys
+import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, NamedTuple, Optional, Tuple
 
 import cadquery as cq
 from cadquery import Location, Plane, Vector, Wire
-from cadquery.func import circle, clean, face, fuse, intersect, sweep
-from cadquery.occ_impl.shapes import Compound, Solid
+from cadquery.func import circle, clean, face, intersect, loft, solid, sweep
+from cadquery.occ_impl.shapes import Solid
 from tqdm.auto import tqdm
 
+from ..fuse_utils import _assert_single_solid, _fuse_solids_map_reduce, _release
 from ..path_frames import PathFrame, frame_at_arc_length, sample_path_frames
 from .swept_face import SweptFaceModel
 
@@ -142,9 +144,26 @@ def _frame_axes(frame: PathFrame):
     return _norm3(t), _norm3(x), _norm3(y)
 
 
-def _braiding_curve_point(s: float, frame: PathFrame, params: BraidParams, phase: float, direction: int):
-    """Point on a single braiding curve at arc length s along the path (He et al. Eq. 17/18)."""
-    _, x_dir, y_dir = _frame_axes(frame)
+class _StrandSample(NamedTuple):
+    """Precomputed centerline data at one arc-length sample, shared by all strands.
+
+    ``center``/``x_dir``/``y_dir`` are the parallel-transported frame origin and
+    unit basis (already normalized) at arc length ``s``. They depend only on the
+    path shape, so every strand reuses the same samples; only the phase/direction
+    weave term in ``_braiding_curve_point`` differs per strand.
+    """
+
+    s: float
+    center: Tuple[float, float, float]
+    x_dir: Tuple[float, float, float]
+    y_dir: Tuple[float, float, float]
+
+
+def _braiding_curve_point(sample: _StrandSample, params: BraidParams, phase: float, direction: int):
+    """Point on a single braiding curve at the sample's arc length (He et al. Eq. 17/18)."""
+    s = sample.s
+    x_dir = sample.x_dir
+    y_dir = sample.y_dir
     theta_s = direction * (s / params.pitch) * 2.0 * math.pi + phase
     omega_s = 2.0 * math.pi * params.N / params.pitch
     r_mod = (
@@ -153,12 +172,49 @@ def _braiding_curve_point(s: float, frame: PathFrame, params: BraidParams, phase
         + direction * params.A * math.sin(omega_s * s)
     )
     cos_t, sin_t = math.cos(theta_s), math.sin(theta_s)
-    ox, oy, oz = frame.point.x, frame.point.y, frame.point.z
+    ox, oy, oz = sample.center
     return (
         ox + r_mod * (cos_t * x_dir[0] + sin_t * y_dir[0]),
         oy + r_mod * (cos_t * x_dir[1] + sin_t * y_dir[1]),
         oz + r_mod * (cos_t * x_dir[2] + sin_t * y_dir[2]),
     )
+
+
+def _sample_strand_centerline(
+    frames: List[PathFrame],
+    path_length: float,
+    params: BraidParams,
+    loft_samples: int,
+) -> List[_StrandSample]:
+    """Sample the centerline frames once on the shared arc-length grid.
+
+    The grid (``s_start`` .. ``s_end`` over ``loft_samples`` steps) and the frame
+    at each ``s`` are identical for every strand, so this work is hoisted out of
+    the per-strand loop. Valid for any path shape (rod, helix, trefoil); curvature
+    is already encoded in ``frames``.
+    """
+    if loft_samples < 2:
+        raise ValueError("need at least 2 centerline samples for strand loft")
+    s_start = params.strand_start
+    s_end = path_length - params.strand_end_offset
+    strand_length = s_end - s_start
+    if strand_length <= 0:
+        raise ValueError("path too short for strand loft")
+
+    samples: List[_StrandSample] = []
+    for i in range(loft_samples):
+        s = s_start + (i / (loft_samples - 1)) * strand_length
+        f = frame_at_arc_length(frames, s)
+        _, x_dir, y_dir = _frame_axes(f)
+        samples.append(
+            _StrandSample(
+                s=s,
+                center=(f.point.x, f.point.y, f.point.z),
+                x_dir=x_dir,
+                y_dir=y_dir,
+            )
+        )
+    return samples
 
 
 def _lenticular_wire(center, tangent, x_in_plane, params: BraidParams, direction: int) -> Wire:
@@ -187,27 +243,53 @@ def _lenticular_wire(center, tangent, x_in_plane, params: BraidParams, direction
 _LOFT_CHUNK_SECTIONS = 32
 
 
+
+
+@dataclass
+class _StrandTimings:
+    """Cumulative per-stage wall-clock time across all strand builds.
+
+    Used only for diagnostics: it locates the real OCC bottleneck (loft vs fuse
+    vs clean) so optimization effort is spent where it matters.
+    """
+
+    wires: float = 0.0
+    loft: float = 0.0
+    sew: float = 0.0
+    clean: float = 0.0
+    volume: float = 0.0
+    n_strands: int = 0
+
+    def summary(self) -> str:
+        total = self.wires + self.loft + self.sew + self.clean + self.volume
+        return (
+            f"strand build timing over {self.n_strands} strand(s): "
+            f"wires={self.wires:.1f}s loft={self.loft:.1f}s sew={self.sew:.1f}s "
+            f"clean={self.clean:.1f}s volume={self.volume:.1f}s "
+            f"(timed total={total:.1f}s)"
+        )
+
+
 def _build_braid_strand(
-    path_frames_seq: List[PathFrame],
-    path_length: float,
+    samples: List[_StrandSample],
     params: BraidParams,
     phase: float,
     direction: int,
-    loft_samples: int,
+    timings: Optional[_StrandTimings] = None,
 ):
-    """Lofted lenticular strand along the path following the braiding curve."""
-    s_start = params.strand_start
-    s_end = path_length - params.strand_end_offset
-    strand_length = s_end - s_start
-    if strand_length <= 0:
-        raise ValueError("path too short for strand loft")
+    """Lofted lenticular strand along the path following the braiding curve.
 
-    pts = []
-    for i in range(loft_samples):
-        t = i / (loft_samples - 1)
-        s = s_start + t * strand_length
-        f = frame_at_arc_length(path_frames_seq, s)
-        pts.append(_braiding_curve_point(s, f, params, phase, direction))
+    ``samples`` are the shared centerline samples from ``_sample_strand_centerline``;
+    only the phase/direction weave term differs per strand.
+    """
+    loft_samples = len(samples)
+    if loft_samples < 2:
+        raise ValueError("need at least 2 centerline samples for strand loft")
+
+    pts = [
+        _braiding_curve_point(samples[i], params, phase, direction)
+        for i in range(loft_samples)
+    ]
 
     tangents = []
     for i in range(loft_samples):
@@ -225,9 +307,7 @@ def _build_braid_strand(
 
     outwards = []
     for i in range(loft_samples):
-        s = s_start + i / (loft_samples - 1) * strand_length
-        f = frame_at_arc_length(path_frames_seq, s)
-        center = (f.point.x, f.point.y, f.point.z)
+        center = samples[i].center
         outwards.append(_norm3((
             pts[i][0] - center[0],
             pts[i][1] - center[1],
@@ -246,33 +326,50 @@ def _build_braid_strand(
         proj = (prev_x[0] - d * tang[0], prev_x[1] - d * tang[1], prev_x[2] - d * tang[2])
         x_dirs.append(_norm3(proj))
 
+    t_mark = time.perf_counter()
     wires = [
         _lenticular_wire(pts[i], tangents[i], x_dirs[i], params, direction)
         for i in range(loft_samples)
     ]
+    if timings is not None:
+        timings.wires += time.perf_counter() - t_mark
 
-    # OCC ThruSections degrades on long high-twist section sequences: a single
-    # loft over all sections collapsed CCW strands to ~73% of their analytic
-    # volume (and to garbage at other sample counts), while bounded chunks are
-    # exact for both directions. Loft chunks over shared boundary wires and
-    # fuse them into one strand solid.
-    chunk_solids = []
+    # Build the strand solid without boolean fusion. ThruSections stays chunked
+    # because long high-twist sequences destabilize it (a single loft over all
+    # sections collapsed CCW strands to ~73% of their analytic volume). Each
+    # chunk is lofted as an *uncapped* shell; adjacent chunks share an identical
+    # boundary wire, so their lateral faces -- plus one planar cap at each end --
+    # sew into a single closed shell that ShapeFix turns into a solid. Sewing is
+    # a topological stitch along shared edges, replacing the boolean union of
+    # capped chunk solids whose coincident internal cap faces made OCC's general
+    # fuse the dominant cost of the whole build (~75% of strand time).
+    t_mark = time.perf_counter()
+    chunk_faces: List[Any] = []
     i = 0
     while i < loft_samples - 1:
         j = min(i + _LOFT_CHUNK_SECTIONS, loft_samples - 1)
-        chunk_solids.append(Solid.makeLoft(wires[i : j + 1], ruled=False))
+        chunk_faces.extend(loft(wires[i : j + 1], cap=False, ruled=False).Faces())
         i = j
-    merged = chunk_solids[0]
-    for chunk in chunk_solids[1:]:
-        merged = fuse(merged, chunk)
+    if timings is not None:
+        timings.loft += time.perf_counter() - t_mark
+
+    t_mark = time.perf_counter()
+    merged = solid([*chunk_faces, face(wires[0]), face(wires[-1])])
+    if timings is not None:
+        timings.sew += time.perf_counter() - t_mark
+
+    t_mark = time.perf_counter()
     merged = clean(merged)
+    if timings is not None:
+        timings.clean += time.perf_counter() - t_mark
+
     merged_solids = merged.Solids()
     if len(merged_solids) != 1:
         raise RuntimeError(
-            f"braid strand chunks fused into {len(merged_solids)} solids, expected 1 "
+            f"braid strand chunks sewed into {len(merged_solids)} solids, expected 1 "
             f"(direction={direction}, phase={phase:.3f})"
         )
-    solid = merged_solids[0]
+    solid_out = merged_solids[0]
 
     # Guard against folded/collapsed lofts: the solid volume must be close to
     # ellipse area x centerline length. A bare positive-volume check passes
@@ -281,13 +378,17 @@ def _build_braid_strand(
         math.dist(pts[i], pts[i - 1]) for i in range(1, loft_samples)
     )
     expected_volume = math.pi * params.p * params.a * centerline_length
-    volume = solid.Volume()
+    t_mark = time.perf_counter()
+    volume = solid_out.Volume()
+    if timings is not None:
+        timings.volume += time.perf_counter() - t_mark
+        timings.n_strands += 1
     if not (0.85 * expected_volume <= volume <= 1.15 * expected_volume):
         raise RuntimeError(
             f"braid strand loft volume {volume:.1f} mm^3 deviates from expected "
             f"{expected_volume:.1f} mm^3 (direction={direction}, phase={phase:.3f})"
         )
-    return solid
+    return solid_out
 
 
 def _build_core_tube(frames: List[PathFrame], params: BraidParams) -> Solid:
@@ -466,6 +567,32 @@ def _swept_embed_clip_shell(
     return sweep(oriented, path, aux=aux)
 
 
+def _build_embed_clip_solid(
+    path,
+    aux,
+    config: Any,
+    params: BraidParams,
+    *,
+    rotation_z: float = 90.0,
+):
+    """Build the single swept embed-clip shell reused for every strand."""
+    max_r = _strand_envelope_radius(params) + float(config.tube_settings.outer_radius)
+    return _swept_embed_clip_shell(
+        path, aux, config, max_radius=max_r, rotation_z=rotation_z
+    )
+
+
+def _clip_one_strand(strand: Solid, clip_solid) -> Solid:
+    """Intersect one strand with the embed shell, failing loudly on empty results."""
+    try:
+        result = intersect(strand, clip_solid)
+    except Exception as exc:
+        raise RuntimeError("strand embed clip failed") from exc
+    if result.Volume() <= 1e-3:
+        raise RuntimeError("strand has no volume above embed shell after clip")
+    return result
+
+
 def _clip_strands_to_embed_shell(
     strands: List[Solid],
     path,
@@ -478,9 +605,8 @@ def _clip_strands_to_embed_shell(
     """Drop strand material below the embed shell so the base tube OD stays round."""
     if not strands:
         return strands
-    max_r = _strand_envelope_radius(params) + float(config.tube_settings.outer_radius)
-    clip_solid = _swept_embed_clip_shell(
-        path, aux, config, max_radius=max_r, rotation_z=rotation_z
+    clip_solid = _build_embed_clip_solid(
+        path, aux, config, params, rotation_z=rotation_z
     )
     clipped: List[Solid] = []
     bar = tqdm(
@@ -489,23 +615,242 @@ def _clip_strands_to_embed_shell(
         unit="strand",
         disable=not sys.stderr.isatty(),
     )
-    for strand in strands:
-        try:
-            result = intersect(strand, clip_solid)
-        except Exception as exc:
-            bar.close()
-            raise RuntimeError("strand embed clip failed") from exc
-        if result.Volume() <= 1e-3:
-            bar.close()
-            raise RuntimeError("strand has no volume above embed shell after clip")
-        clipped.append(result)
-        bar.update(1)
-    bar.close()
+    try:
+        for strand in strands:
+            clipped.append(_clip_one_strand(strand, clip_solid))
+            bar.update(1)
+    finally:
+        bar.close()
     return clipped
 
 
+# ---------------------------------------------------------------------------
+# Streaming assembly (bounded memory)
+# ---------------------------------------------------------------------------
+
+_DEFAULT_FUSE_METHOD = "brep"
+_DEFAULT_FUSE_BATCH_SIZE = 12
+# Coarser than the final-export render tolerance on purpose: each strand B-rep
+# is ~10^6 triangles at 0.001 mm, so meshing 150 strands that finely OOMs.
+# ~0.05 mm is print-appropriate (SLA layer heights are ~0.05 mm) and ~36x
+# lighter per strand.
+_DEFAULT_MESH_TOLERANCE = 0.05
+_DEFAULT_MESH_ANGULAR_TOLERANCE = 0.3
+
+
+def _make_rss_logger(label: str) -> Optional[Callable[[str], None]]:
+    """Return a stage-boundary RSS logger, or ``None`` if psutil is unavailable.
+
+    Memory pressure is the whole point of the streaming build, so log resident
+    set size at stage boundaries to produce evidence instead of guesses. psutil
+    is optional: absence degrades to no instrumentation, never to a crash.
+    """
+    try:
+        import psutil
+    except Exception:
+        return None
+    proc = psutil.Process()
+
+    def _log(stage: str) -> None:
+        rss_gb = proc.memory_info().rss / (1024.0 ** 3)
+        logger.info("%s: RSS=%.2f GB (%s)", label, rss_gb, stage)
+
+    return _log
+
+
+def _iter_braid_strands(
+    strand_samples: List["_StrandSample"],
+    params: BraidParams,
+    timings: "_StrandTimings",
+) -> Iterator[Solid]:
+    """Yield each of the ``2N`` braid strand solids in build order, lazily.
+
+    Lazy generation is what keeps memory bounded: the caller fuses (or meshes)
+    each strand and drops it before the next is built, so the full set of
+    strands is never resident at once.
+    """
+    for direction in (-1, 1):
+        for i in range(params.num_strands_per_dir):
+            phase = i * (2.0 * math.pi / params.num_strands_per_dir)
+            if direction == 1:
+                phase += math.pi / params.num_strands_per_dir
+            yield _build_braid_strand(strand_samples, params, phase, direction, timings)
+
+
+def _flush_brep_batch(accumulator, pending: List[Solid], *, name: str):
+    """Fuse a batch of pending strands into the running accumulator and release them."""
+    if not pending:
+        return accumulator
+    merged = _fuse_solids_map_reduce(
+        [accumulator, *pending], name=name, show_progress=False
+    )
+    pending.clear()
+    _release()
+    return merged
+
+
+def _assemble_brep(
+    core,
+    strands: Iterator[Solid],
+    *,
+    total_strands: int,
+    clip_solid,
+    batch_size: int,
+    name: str,
+    rss: Optional[Callable[[str], None]] = None,
+) -> Solid:
+    """Stream build -> per-strand clip -> batched fuse into one accumulator solid.
+
+    Peak memory is bounded by ``accumulator + batch_size`` strands rather than
+    all ``2N`` strands plus map-reduce intermediates, which is what previously
+    drove the process into an OOM kill during the final fuse.
+    """
+    accumulator = core
+    pending: List[Solid] = []
+    built = 0
+    bar = tqdm(
+        total=total_strands,
+        desc=f"Building + fusing braid strands for {name}",
+        unit="strand",
+        disable=not sys.stderr.isatty(),
+    )
+    try:
+        for strand in strands:
+            if clip_solid is not None:
+                strand = _clip_one_strand(strand, clip_solid)
+            pending.append(strand)
+            built += 1
+            bar.update(1)
+            if len(pending) >= batch_size:
+                accumulator = _flush_brep_batch(accumulator, pending, name=name)
+                if rss is not None:
+                    rss(f"fused {built}/{total_strands}")
+        accumulator = _flush_brep_batch(accumulator, pending, name=name)
+    finally:
+        bar.close()
+    if built != total_strands:
+        raise RuntimeError(
+            f"expected {total_strands} braid strands, built {built}"
+        )
+    _assert_single_solid(accumulator, name=name)
+    return accumulator
+
+
+def _shape_to_trimesh(shape, *, tolerance: float, angular_tolerance: float):
+    """Tessellate a CadQuery shape directly to a ``trimesh.Trimesh`` (no temp file)."""
+    import trimesh
+
+    s = shape.val() if hasattr(shape, "val") else shape
+    verts, tris = s.tessellate(tolerance, angular_tolerance)
+    return trimesh.Trimesh(
+        vertices=[(v.x, v.y, v.z) for v in verts],
+        faces=tris,
+    )
+
+
+def _assemble_mesh(
+    core,
+    strands: Iterator[Solid],
+    *,
+    total_strands: int,
+    clip_solid,
+    tolerance: float,
+    angular_tolerance: float,
+    batch_size: int,
+    name: str,
+    rss: Optional[Callable[[str], None]] = None,
+):
+    """Stream tessellate -> per-strand mesh clip -> batched manifold union.
+
+    The manifold engine unions watertight meshes far faster and with far less
+    memory than OCC B-rep booleans, at the cost of producing a mesh rather than
+    a parametric solid (so STEP / SLA-optimize are unavailable on this path).
+
+    ``tolerance`` is deliberately coarser than the final-export render tolerance:
+    each braid strand B-rep carries ~10^6 triangles at 0.001 mm, so meshing 150
+    of them at that fidelity is hundreds of millions of triangles (an OOM). A
+    print-appropriate tolerance (~0.05 mm) keeps the union bounded.
+    """
+    import trimesh
+
+    running = _shape_to_trimesh(
+        core, tolerance=tolerance, angular_tolerance=angular_tolerance
+    )
+    shell_mesh = None
+    if clip_solid is not None:
+        shell_mesh = _shape_to_trimesh(
+            clip_solid, tolerance=tolerance, angular_tolerance=angular_tolerance
+        )
+
+    pending: List[Any] = []
+    built = 0
+
+    def _flush() -> None:
+        nonlocal running, pending
+        if not pending:
+            return
+        batch = (
+            trimesh.boolean.union(pending, engine="manifold")
+            if len(pending) > 1
+            else pending[0]
+        )
+        running = trimesh.boolean.union([running, batch], engine="manifold")
+        pending = []
+        _release()
+
+    bar = tqdm(
+        total=total_strands,
+        desc=f"Meshing + unioning braid strands for {name}",
+        unit="strand",
+        disable=not sys.stderr.isatty(),
+    )
+    try:
+        for strand in strands:
+            strand_mesh = _shape_to_trimesh(
+                strand, tolerance=tolerance, angular_tolerance=angular_tolerance
+            )
+            del strand
+            if shell_mesh is not None:
+                strand_mesh = trimesh.boolean.intersection(
+                    [strand_mesh, shell_mesh], engine="manifold"
+                )
+                if strand_mesh.is_empty or strand_mesh.volume <= 1e-3:
+                    raise RuntimeError(
+                        "strand mesh has no volume above embed shell after clip"
+                    )
+            pending.append(strand_mesh)
+            built += 1
+            bar.update(1)
+            if len(pending) >= batch_size:
+                _flush()
+                if rss is not None:
+                    rss(f"unioned {built}/{total_strands}")
+        _flush()
+    finally:
+        bar.close()
+    if built != total_strands:
+        raise RuntimeError(
+            f"expected {total_strands} braid strands, built {built}"
+        )
+    if not running.is_watertight:
+        raise RuntimeError(f"{name}: mesh union is not watertight")
+    if running.body_count != 1:
+        raise RuntimeError(
+            f"{name}: mesh union produced {running.body_count} disconnected "
+            "bodies (strands do not touch)"
+        )
+    return running
+
+
 class BraidedRopeModel:
-    """Braided sleeve: smooth core + 2N interlacing helical strands as a Compound."""
+    """Braided sleeve: smooth core + 2N interlacing helical strands.
+
+    Strands are built lazily and folded one at a time into a running result so
+    memory stays bounded for high strand counts. ``fuse_method`` selects the
+    output: ``brep`` (default) returns a single fused ``Solid`` and preserves the
+    STEP / SLA-optimize pipeline; ``mesh`` returns a watertight ``trimesh.Trimesh``
+    via fast manifold unions (no STEP / optimize).
+    """
 
     def build(
         self,
@@ -523,6 +868,17 @@ class BraidedRopeModel:
                 f"braided_rope.base_face_type cannot be {base_face_type!r}"
             )
 
+        raw = getattr(config.tube_settings, "braided_rope", None) or {}
+        fuse_method = str(raw.get("fuse_method", _DEFAULT_FUSE_METHOD)).lower()
+        if fuse_method not in ("brep", "mesh"):
+            raise ValueError(
+                f"braided_rope.fuse_method must be 'brep' or 'mesh' "
+                f"(got {fuse_method!r})"
+            )
+        batch_size = int(raw.get("fuse_batch_size", _DEFAULT_FUSE_BATCH_SIZE))
+        if batch_size < 1:
+            raise ValueError("braided_rope.fuse_batch_size must be >= 1")
+
         # Centerline frames: denser when the path is curved or long.
         num_frames = max(120, min(400, int(path_length / 1.0)))
         frames = sample_path_frames(path, num_frames)
@@ -538,12 +894,17 @@ class BraidedRopeModel:
         )
 
         logger.info(
-            "BraidedRopeModel: %s; base_face_type=%s; path_length=%.1f mm, loft_samples=%d",
+            "BraidedRopeModel: %s; base_face_type=%s; path_length=%.1f mm, "
+            "loft_samples=%d, fuse_method=%s, batch_size=%d",
             params.summary(),
             base_face_type,
             path_length,
             loft_samples,
+            fuse_method,
+            batch_size,
         )
+
+        rss = _make_rss_logger("BraidedRopeModel")
 
         if base_face_type == "braid_core":
             core = _build_core_tube(frames, params)
@@ -556,48 +917,55 @@ class BraidedRopeModel:
                 f"braided_rope.base_face_type must be 'braid_core' or one of "
                 f"{sorted(_SWEPT_BASE_FACE_TYPES)!r} (got {base_face_type!r})"
             )
+        if rss is not None:
+            rss("core built")
+
+        # Centerline samples (frame at each arc-length step) are identical for
+        # every strand, so sample them once instead of per strand.
+        strand_samples = _sample_strand_centerline(
+            frames, path_length, params, loft_samples
+        )
 
         total_strands = 2 * params.num_strands_per_dir
-        strands: List[Solid] = []
-        bar = tqdm(
-            total=total_strands,
-            desc="Building braid strands",
-            unit="strand",
-            disable=not sys.stderr.isatty(),
-        )
-        for direction in (-1, 1):
-            for i in range(params.num_strands_per_dir):
-                phase = i * (2.0 * math.pi / params.num_strands_per_dir)
-                if direction == 1:
-                    phase += math.pi / params.num_strands_per_dir
-                strands.append(
-                    _build_braid_strand(
-                        frames, path_length, params, phase, direction, loft_samples
-                    )
-                )
-                bar.update(1)
-        bar.close()
+        timings = _StrandTimings()
 
-        if len(strands) != total_strands:
-            raise RuntimeError(
-                f"expected {total_strands} braid strands, built {len(strands)}"
-            )
-
-        logger.info(
-            "BraidedRopeModel: built %d/%d strands",
-            len(strands),
-            total_strands,
-        )
-
-        if base_face_type in _SWEPT_BASE_FACE_TYPES and strands:
+        clip_solid = None
+        if base_face_type in _SWEPT_BASE_FACE_TYPES:
             rotation_z = float((face_kwargs or {}).get("rotation_z", 90.0))
-            logger.info(
-                "BraidedRopeModel: clipping %d strands to embed shell",
-                len(strands),
+            clip_solid = _build_embed_clip_solid(
+                path, aux, config, params, rotation_z=rotation_z
             )
-            strands = _clip_strands_to_embed_shell(
-                strands, path, aux, config, params, rotation_z=rotation_z
-            )
-            return Compound.makeCompound([core, *strands])
 
-        return Compound.makeCompound([core, *strands])
+        strands = _iter_braid_strands(strand_samples, params, timings)
+        name = config.name or "braid"
+
+        if fuse_method == "mesh":
+            tol = float(raw.get("mesh_tolerance", _DEFAULT_MESH_TOLERANCE))
+            ang = float(raw.get("mesh_angular_tolerance", _DEFAULT_MESH_ANGULAR_TOLERANCE))
+            result = _assemble_mesh(
+                core,
+                strands,
+                total_strands=total_strands,
+                clip_solid=clip_solid,
+                tolerance=tol,
+                angular_tolerance=ang,
+                batch_size=batch_size,
+                name=name,
+                rss=rss,
+            )
+        else:
+            result = _assemble_brep(
+                core,
+                strands,
+                total_strands=total_strands,
+                clip_solid=clip_solid,
+                batch_size=batch_size,
+                name=name,
+                rss=rss,
+            )
+
+        logger.info("BraidedRopeModel: built %d/%d strands", total_strands, total_strands)
+        logger.info("BraidedRopeModel: %s", timings.summary())
+        if rss is not None:
+            rss("assembly complete")
+        return result

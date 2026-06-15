@@ -255,7 +255,10 @@ What it builds:
    counter-clockwise, phase-staggered so they interlace. Each strand is
    computed from He et al. 2020 Eqs. 17/18 (braiding curve) with Kyosev's
    lenticular cross-section, then lofted or swept along its trajectory.
-3. Returned as a single `Compound` of `[core, *strands]`.
+3. Strands are built lazily and folded one at a time into a running result so
+   memory stays bounded at high strand counts (see `fuse_method` below). The
+   build returns either a single fused `Solid` (`fuse_method: brep`, default) or
+   a watertight `trimesh.Trimesh` (`fuse_method: mesh`).
 
 Config keys (`face_settings.braided_rope.braided_rope`):
 
@@ -274,6 +277,12 @@ Config keys (`face_settings.braided_rope.braided_rope`):
 | `strand_start` | Trim from path start in mm. | `2.0` |
 | `strand_end_offset` | Trim from path end in mm. | `2.0` |
 | `valley_embed_depth` | Swept-base only (`base_face_type` not `braid_core`): target depth (mm) for braid valley centerlines below the tube OD. Controls weave placement and print overlap; strand solids are clipped at the tube OD before fuse so the base wall stays cylindrical. Must be `>= 0`, `< outer_radius`, and `<= wall_thickness`. Ignored for standalone `braided_rope`. When `outer_radius` is not set explicitly, the model auto-scales the braid envelope to the tube OD before applying valley embed. | `0.5` |
+| `fuse_method` | How the `2N` strands and core are assembled. `brep` builds each strand, clips it, and folds it into a running fused `Solid` one batch at a time (bounded memory; output is a single B-rep `Solid`, so STEP export and the SLA optimize/drain-hole stages keep working). `mesh` tessellates each strand and unions it into a watertight mesh via the `manifold` engine (much faster and lighter for high strand counts, but the output is a `trimesh.Trimesh`: STEP export and `--optimize`/`--auto-orient` are unavailable and will raise). | `brep` |
+| `fuse_batch_size` | How many strands are fused (`brep`) or unioned (`mesh`) per batch. Lower values cap peak RAM (fewer strands resident at once) at the cost of more boolean calls; higher values process larger chunks. | `12` |
+| `mesh_tolerance` | `mesh` only: linear tessellation tolerance (mm) for each strand before union. Deliberately coarser than the final-export render tolerance: each strand B-rep is ~10^6 triangles at 0.001 mm, so meshing 150 strands that finely exhausts memory. `~0.05 mm` is print-appropriate and far lighter. | `0.05` |
+| `mesh_angular_tolerance` | `mesh` only: angular tessellation tolerance (rad) for each strand before union. | `0.3` |
+
+> Note on very high strand counts: B-rep boolean fusion (`fuse_method: brep`) scales poorly as the fused accumulator grows, so a 150-strand braid can take many hours even though memory stays bounded. For high strand counts prefer `fuse_method: mesh`, which unions watertight strand meshes via the `manifold` engine in minutes. The trade-off is that the mesh output cannot be exported as STEP and is not accepted by the SLA optimize / drain-hole stages; use `brep` (the default) when you need those.
 
 The constructor derives `Rr`, `a`, `p`, `A`, `pitch`, and `core_radius` from
 these inputs; if `core_radius` ends up `<= 0` it raises `ValueError` with
