@@ -17,7 +17,7 @@ output_bounds:
 
 # Active tube model: led_circle | led_circle_tube | solid_circle | square |
 # pyramid_studded | braided_rope | braided_rope_tube
-face_type: braided_rope_tube
+face_type: led_circle_tube
 
 # -----------------------------------------------------------------------------
 # Face-specific settings (keyed by face type)
@@ -80,9 +80,12 @@ face_settings:
       strand_end_offset: 2.0         # mm – trim from path end
       valley_embed_depth: 0.5        # mm – swept-base only: braid valleys sink into tube OD
       fuse_method: brep              # brep (single fused Solid; keeps STEP/optimize) | mesh (fast manifold union; mesh-only output)
-      fuse_batch_size: 12            # strands fused/unioned per batch; lower = less peak RAM, more boolean calls
-      mesh_tolerance: 0.05           # mesh only: per-strand tessellation tol (mm); coarser than render tol to bound face count
+      fuse_batch_size: 12            # brep only: strands fused per batch; lower = less peak RAM, more fuse calls
+      mesh_batch_size: 2             # mesh only: strands unioned per chunk; lower = less peak RAM during map-reduce
+      mesh_tolerance: 0.05           # mesh only: per-strand tessellation tol (mm); auto-coarsened up to mesh_tolerance_max when curved paths exceed mesh_max_strand_faces
       mesh_angular_tolerance: 0.3    # mesh only: per-strand angular tessellation tol (rad)
+      mesh_tolerance_max: 0.3        # mesh only: coarsest tol tried when auto-scaling for face budget
+      mesh_max_strand_faces: 80000   # mesh only: per-strand face budget before union; curved paths may need coarser tol
 
   # Braided-rope sleeve on an LED tube (inner wire hole + connectors).
   braided_rope_tube:
@@ -95,16 +98,19 @@ face_settings:
       strand_aspect_ratio: 1.6
       tilt_to_helix_angle: true
       weave_amplitude_factor: 1.0
-      pack_factor: 0.7
-      braid_tightness: 0.0
+      pack_factor: 0.9
+      braid_tightness: 1.0
       samples_per_period: 20
       strand_start: 2.0
       strand_end_offset: 2.0
       valley_embed_depth: 0.5        # mm – braid valleys sink into tube OD for controlled fusion
       fuse_method: brep              # brep (single fused Solid; keeps STEP/optimize) | mesh (fast manifold union; mesh-only output)
-      fuse_batch_size: 12            # strands fused/unioned per batch; lower = less peak RAM, more boolean calls
-      mesh_tolerance: 0.05           # mesh only: per-strand tessellation tol (mm); coarser than render tol to bound face count
+      fuse_batch_size: 12            # brep only: strands fused per batch; lower = less peak RAM, more fuse calls
+      mesh_batch_size: 2             # mesh only: strands unioned per chunk; lower = less peak RAM during map-reduce
+      mesh_tolerance: 0.05           # mesh only: per-strand tessellation tol (mm); auto-coarsened up to mesh_tolerance_max when curved paths exceed mesh_max_strand_faces
       mesh_angular_tolerance: 0.3    # mesh only: per-strand angular tessellation tol (rad)
+      mesh_tolerance_max: 0.3        # mesh only: coarsest tol tried when auto-scaling for face budget
+      mesh_max_strand_faces: 80000   # mesh only: per-strand face budget before union; curved paths may need coarser tol
 
 # -----------------------------------------------------------------------------
 # Path / twist limits
@@ -177,6 +183,55 @@ clamp:
   alignment_notch_width_mm: 3.0   # mm – length along Z (axial)
   alignment_notch_depth_mm: 0.8   # mm – protrusion into mating half (Y)
   alignment_notch_clearance_mm: 0.1  # mm – clearance for easy assembly
+
+# -----------------------------------------------------------------------------
+# Finger pulse-sensor holder (PulseSensor.com accessory)
+# -----------------------------------------------------------------------------
+finger_sensor_holder:
+  holder_width: 30.00              # mm
+  holder_length: 67.00              # mm
+  base_thickness: 4.48              # mm
+  wall_thickness: 2.29              # mm
+  wall_full_height: 20.70            # mm above base top
+  rear_wall_low_height: 8.45        # mm above base top at rear edge
+  rear_transition_length: 23.57      # mm
+  front_transition_length: 4.90     # mm
+  hinge_axis_from_rear: 22.70        # mm
+  hinge_axis_height_above_base: 14.40  # mm
+  hinge_rod_diameter: 3.17          # mm
+  hinge_outer_diameter: 5.02        # mm
+  pedestal_front_offset: 9.50       # mm from front edge
+  pedestal_width: 17.00             # mm
+  pedestal_front_height: 10.00       # mm above base top
+  sensor_pcb_diameter: 15.80        # mm
+  sensor_max_thickness: 3.60         # mm
+  sensor_pocket_diameter: 16.20      # mm (recommended; editable)
+  sensor_pocket_depth: 3.70          # mm (recommended; editable)
+  sensor_exposed_opening_diameter: 15.00  # mm (recommended; editable)
+  cable_channel_width: 4.50         # mm (recommended; editable)
+  cable_channel_depth: 2.50         # mm (recommended; editable)
+  general_fillet_radius: 1.00        # mm
+  # Assumption parameters — tune after first prototype:
+  front_transition_radius: 2.00      # mm quarter-round at front wall rise
+  rear_transition_radius: 2.50       # mm quarter-round at rear wall decline
+  pedestal_length: 32.00             # mm
+  pedestal_rear_height_above_base: 6.00  # mm
+  finger_trough_width: 15.00         # mm
+  finger_trough_depth: 3.50          # mm
+  finger_trough_length: 28.00        # mm
+  finger_stop_radius: 8.00            # mm
+  finger_trough_front_blend_length: 5.00  # mm
+  sensor_center_y: 33.50             # mm lateral centerline, along Y
+  sensor_face_raise_mm: 0.25         # mm above local trough surface
+  hinge_rod_clearance_mm: 0.15       # mm radial clearance per side for pin
+  retention_plate_clearance_mm: 0.25   # mm per side for removable plate
+  retention_plate_thickness_mm: 1.50  # mm
+  retention_tab_count: 3
+  retention_tab_width_mm: 2.00        # mm
+  retention_tab_depth_mm: 0.80       # mm
+  cable_exit_y: 62.00                 # mm
+  strain_relief_pocket_diameter: 6.00  # mm
+  strain_relief_pocket_depth: 1.50    # mm
 
 # -----------------------------------------------------------------------------
 # Print optimization (SLA / resin print prep)

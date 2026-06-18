@@ -1,0 +1,25 @@
+knot_type: trefoil
+print_optimization:
+  enabled: true
+  target: sla                  # sla | fdm  (PR1 wires up sla only)
+  overhang_threshold_deg: 35   # SLA: ~35°; FDM: ~45° (reserved for future)
+  orientation:
+    enabled: true
+    auto_apply: false          # require --auto-orient to mutate geometry
+    top_n_candidates: 5
+    # Multiplicative bonus when a candidate orientation stands the LED-tube
+    # connectors vertically (so they act as natural support columns).
+    # 0 disables; 0.7 means a fully-vertical-connectors orientation cuts
+    # Tweaker-3's unprintability score by 70%, usually enough to flip the
+    # default volume-minimising pick to the connectors-as-supports pose.
+    connector_bonus_weight: 0.7
+  drain_holes:
+    # Auto-drill drain (bottom) + vent (top) holes through trapped resin
+    # cavities detected by the analyzer. Requires --auto-orient AND the
+    # cavity detector to be available (manifold3d installed). Disabled by
+    # default — opt in only after the analyzer's cavity report on your
+    # part looks correct.
+    enabled: true
+    diameter_mm: 1.5
+    min_cavity_volume_mm3: 100.0
+    margin_mm: 5.0             # how far the drill cylinder extends past the part Z-extents

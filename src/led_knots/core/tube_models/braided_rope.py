@@ -239,8 +239,25 @@ def _lenticular_wire(center, tangent, x_in_plane, params: BraidParams, direction
     return Wire.makeEllipse(params.p, params.a, pl.origin, pl.zDir, pl.xDir)
 
 
-# Max sections per loft call; longer sequences destabilize OCC ThruSections.
+# Max sections per uncapped loft chunk. A single ThruSections over the full
+# wire sequence collapsed CCW strands on straight paths; chunking fixes that.
+# On high-twist curved paths, large chunks can still collapse when the chunk
+# shells are sewn -- fall back to smaller chunk sizes (see _LOFT_CHUNK_FALLBACKS).
 _LOFT_CHUNK_SECTIONS = 32
+_LOFT_CHUNK_FALLBACKS = (16, 8, 4, 2)
+
+
+def _sew_strand_solid_from_wires(wires: List[Wire], chunk_sections: int):
+    """Loft uncapped chunk shells plus end caps into one strand solid."""
+    n = len(wires)
+    chunk_faces: List[Any] = []
+    i = 0
+    while i < n - 1:
+        j = min(i + chunk_sections, n - 1)
+        chunk_faces.extend(loft(wires[i : j + 1], cap=False, ruled=False).Faces())
+        i = j
+    merged = solid([*chunk_faces, face(wires[0]), face(wires[-1])])
+    return clean(merged)
 
 
 
@@ -334,59 +351,58 @@ def _build_braid_strand(
     if timings is not None:
         timings.wires += time.perf_counter() - t_mark
 
+    centerline_length = sum(
+        math.dist(pts[i], pts[i - 1]) for i in range(1, loft_samples)
+    )
+    expected_volume = math.pi * params.p * params.a * centerline_length
+
     # Build the strand solid without boolean fusion. ThruSections stays chunked
     # because long high-twist sequences destabilize it (a single loft over all
     # sections collapsed CCW strands to ~73% of their analytic volume). Each
     # chunk is lofted as an *uncapped* shell; adjacent chunks share an identical
     # boundary wire, so their lateral faces -- plus one planar cap at each end --
-    # sew into a single closed shell that ShapeFix turns into a solid. Sewing is
-    # a topological stitch along shared edges, replacing the boolean union of
-    # capped chunk solids whose coincident internal cap faces made OCC's general
-    # fuse the dominant cost of the whole build (~75% of strand time).
-    t_mark = time.perf_counter()
-    chunk_faces: List[Any] = []
-    i = 0
-    while i < loft_samples - 1:
-        j = min(i + _LOFT_CHUNK_SECTIONS, loft_samples - 1)
-        chunk_faces.extend(loft(wires[i : j + 1], cap=False, ruled=False).Faces())
-        i = j
-    if timings is not None:
-        timings.loft += time.perf_counter() - t_mark
+    # sew into a single closed shell that ShapeFix turns into a solid.
+    #
+    # On high-twist curved paths, large chunk sizes can still collapse when sewn.
+    # Try progressively smaller chunks until the analytic volume guard passes;
+    # if every size fails, raise with the full attempt log (no silent fallback).
+    chunk_sizes = (_LOFT_CHUNK_SECTIONS, *_LOFT_CHUNK_FALLBACKS)
+    attempts: List[str] = []
+    solid_out = None
+    for chunk_sections in chunk_sizes:
+        t_mark = time.perf_counter()
+        merged = _sew_strand_solid_from_wires(wires, chunk_sections)
+        if timings is not None:
+            timings.sew += time.perf_counter() - t_mark
 
-    t_mark = time.perf_counter()
-    merged = solid([*chunk_faces, face(wires[0]), face(wires[-1])])
-    if timings is not None:
-        timings.sew += time.perf_counter() - t_mark
+        merged_solids = merged.Solids()
+        if len(merged_solids) != 1:
+            attempts.append(
+                f"chunk={chunk_sections}: sewed into {len(merged_solids)} solids"
+            )
+            continue
 
-    t_mark = time.perf_counter()
-    merged = clean(merged)
-    if timings is not None:
-        timings.clean += time.perf_counter() - t_mark
+        t_mark = time.perf_counter()
+        volume = merged_solids[0].Volume()
+        if timings is not None:
+            timings.volume += time.perf_counter() - t_mark
 
-    merged_solids = merged.Solids()
-    if len(merged_solids) != 1:
-        raise RuntimeError(
-            f"braid strand chunks sewed into {len(merged_solids)} solids, expected 1 "
-            f"(direction={direction}, phase={phase:.3f})"
+        if 0.85 * expected_volume <= volume <= 1.15 * expected_volume:
+            solid_out = merged_solids[0]
+            break
+        attempts.append(
+            f"chunk={chunk_sections}: volume {volume:.1f} mm^3 "
+            f"(expected {expected_volume:.1f} mm^3)"
         )
-    solid_out = merged_solids[0]
 
-    # Guard against folded/collapsed lofts: the solid volume must be close to
-    # ellipse area x centerline length. A bare positive-volume check passes
-    # lofts that lost a quarter of their material to fold-over.
-    centerline_length = sum(
-        math.dist(pts[i], pts[i - 1]) for i in range(1, loft_samples)
-    )
-    expected_volume = math.pi * params.p * params.a * centerline_length
-    t_mark = time.perf_counter()
-    volume = solid_out.Volume()
-    if timings is not None:
-        timings.volume += time.perf_counter() - t_mark
+    if timings is not None and solid_out is not None:
         timings.n_strands += 1
-    if not (0.85 * expected_volume <= volume <= 1.15 * expected_volume):
+
+    if solid_out is None:
         raise RuntimeError(
-            f"braid strand loft volume {volume:.1f} mm^3 deviates from expected "
-            f"{expected_volume:.1f} mm^3 (direction={direction}, phase={phase:.3f})"
+            f"braid strand loft failed volume guard at all chunk sizes "
+            f"(direction={direction}, phase={phase:.3f}): "
+            + "; ".join(attempts)
         )
     return solid_out
 
@@ -551,20 +567,163 @@ def _swept_embed_clip_shell(
     *,
     max_radius: float,
     rotation_z: float = 90.0,
-):
+) -> Tuple[Solid, Solid]:
     """
-    Path-aligned volume: (tube_r - valley_embed_depth) <= r <= max_radius.
+    Path-aligned outer and inner clip solids: (tube_r - valley_embed_depth) <= r <= max_radius.
 
-    Clips below the embed depth, not the tube OD, so strand bodies that
-    intentionally reach into the wall are not discarded.
+    Returns separate lofts so per-strand clip is ``intersect(outer).cut(inner)``. A
+    single pre-cut annulus solid can make OCCT return empty on curved paths.
     """
     raw = getattr(config.tube_settings, "braided_rope", None) or {}
     depth = float(raw.get("valley_embed_depth", _DEFAULT_VALLEY_EMBED_DEPTH))
     tube_r = float(config.tube_settings.outer_radius)
     inner_r = max(tube_r - depth, 0.0)
-    profile = face(circle(max_radius)) - face(circle(inner_r))
-    oriented = _orient_profile_face(profile, path, rotation_z=rotation_z)
-    return sweep(oriented, path, aux=aux)
+    outer_profile = face(circle(max_radius))
+    inner_profile = face(circle(inner_r))
+    outer_oriented = _orient_profile_face(outer_profile, path, rotation_z=rotation_z)
+    inner_oriented = _orient_profile_face(inner_profile, path, rotation_z=rotation_z)
+    return sweep(outer_oriented, path, aux=aux), sweep(inner_oriented, path, aux=aux)
+
+
+_EMBED_CLIP_OUTER_MARGIN = 0.05  # mm above tube OD for tessellation/boolean tolerance
+
+_EmbedClipShell = Tuple[Solid, Solid]
+
+
+def _embed_clip_inner_radius(config: Any) -> float:
+    raw = getattr(config.tube_settings, "braided_rope", None) or {}
+    depth = float(raw.get("valley_embed_depth", _DEFAULT_VALLEY_EMBED_DEPTH))
+    tube_r = float(config.tube_settings.outer_radius)
+    return max(tube_r - depth, 0.0)
+
+
+def _build_frame_aligned_embed_clip_shell(
+    frames: List[PathFrame],
+    config: Any,
+    *,
+    outer_r: float,
+) -> _EmbedClipShell:
+    """Loft outer and inner clip shells on parallel-transported path frames.
+
+    Swept-circle embed shells use the path start tangent only; on curved knots
+    (quarter_turn) that frame diverges from the braid's PT frames and strands
+    poke through the outer clip on the convex side. Lofting on the same
+    ``frames`` grid as the strands keeps the OD clip aligned with the weave.
+    """
+    inner_r = _embed_clip_inner_radius(config)
+    outer_wires: List[Wire] = []
+    inner_wires: List[Wire] = []
+    for f in frames:
+        pl = Plane(origin=f.point, xDir=f.x_dir, normal=f.tangent)
+        outer_wires.append(Wire.makeCircle(outer_r, pl.origin, pl.zDir))
+        inner_wires.append(Wire.makeCircle(inner_r, pl.origin, pl.zDir))
+    return Solid.makeLoft(outer_wires, ruled=True), Solid.makeLoft(inner_wires, ruled=True)
+
+
+def _embed_clip_outer_radius(config: Any, params: BraidParams) -> float:
+    """Outer clip at the modeled strand peak (not envelope + tube_r)."""
+    return _strand_envelope_radius(params) + _EMBED_CLIP_OUTER_MARGIN
+
+
+def _max_centerline_radial_extent(
+    samples: List["_StrandSample"],
+    params: BraidParams,
+    phase: float,
+    direction: int,
+) -> float:
+    """Peak path-axis distance of a strand cross-section from centerline samples."""
+    max_r = 0.0
+    for sample in samples:
+        px, py, pz = _braiding_curve_point(sample, params, phase, direction)
+        cx, cy, cz = sample.center
+        dx, dy, dz = px - cx, py - cy, pz - cz
+        u = (
+            dx * sample.x_dir[0]
+            + dy * sample.x_dir[1]
+            + dz * sample.x_dir[2]
+        )
+        v = (
+            dx * sample.y_dir[0]
+            + dy * sample.y_dir[1]
+            + dz * sample.y_dir[2]
+        )
+        max_r = max(max_r, math.hypot(u, v) + max(params.p, params.a))
+    return max_r
+
+
+def _probe_clip_outer_radius(
+    strand_samples: List["_StrandSample"],
+    params: BraidParams,
+    config: Any,
+) -> float:
+    """Path-aware outer embed radius so every strand phase intersects the shell.
+
+    On curved knots lofted strand solids extend past the centerline envelope;
+    probe every phase on the shared sample grid and add weave + cross-section
+    slack so the outer loft fully contains the solids before the inner cut.
+    """
+    outer_r = _embed_clip_outer_radius(config, params)
+    for direction in (-1, 1):
+        for i in range(params.num_strands_per_dir):
+            phase = i * (2.0 * math.pi / params.num_strands_per_dir)
+            if direction == 1:
+                phase += math.pi / params.num_strands_per_dir
+            outer_r = max(
+                outer_r,
+                _max_centerline_radial_extent(
+                    strand_samples, params, phase, direction
+                ),
+            )
+    return (
+        outer_r
+        + 2.0 * params.A
+        + params.p
+        + max(params.p, params.a)
+        + _EMBED_CLIP_OUTER_MARGIN
+    )
+
+
+def _path_has_curvature(
+    frames: List[PathFrame],
+    path_length: float,
+    *,
+    min_bend_deg: float = 5.0,
+) -> bool:
+    """True when the path bends enough that frame-loft inner cuts are unsafe.
+
+    Dense frame sampling keeps consecutive tangents nearly parallel even on a
+  90° bend; use endpoint tangents and arc/chord stretch instead.
+    """
+    if len(frames) < 2:
+        return False
+    cos_limit = math.cos(math.radians(min_bend_deg))
+    if frames[0].tangent.dot(frames[-1].tangent) < cos_limit:
+        return True
+    chord = frames[0].point.sub(frames[-1].point).Length
+    return chord > 1e-3 and path_length / chord > 1.02
+
+
+def _od_trim_cap_radius(params: BraidParams) -> float:
+    """Trim convex-side loft bulge without cutting nominal strand bodies."""
+    return (
+        _strand_envelope_radius(params)
+        + 3.0 * params.A
+        + params.p
+        + _EMBED_CLIP_OUTER_MARGIN
+    )
+
+
+def _build_frame_aligned_od_trim_cap(
+    frames: List[PathFrame],
+    params: BraidParams,
+) -> Solid:
+    """Solid cylinder at the modeled envelope plus bend slack (frame-aligned loft)."""
+    cap_r = _od_trim_cap_radius(params)
+    wires: List[Wire] = []
+    for f in frames:
+        pl = Plane(origin=f.point, xDir=f.x_dir, normal=f.tangent)
+        wires.append(Wire.makeCircle(cap_r, pl.origin, pl.zDir))
+    return Solid.makeLoft(wires, ruled=True)
 
 
 def _build_embed_clip_solid(
@@ -573,23 +732,43 @@ def _build_embed_clip_solid(
     config: Any,
     params: BraidParams,
     *,
+    frames: Optional[List[PathFrame]] = None,
+    strand_samples: Optional[List["_StrandSample"]] = None,
     rotation_z: float = 90.0,
-):
-    """Build the single swept embed-clip shell reused for every strand."""
-    max_r = _strand_envelope_radius(params) + float(config.tube_settings.outer_radius)
+) -> _EmbedClipShell:
+    """Build the embed-clip (outer, inner) shells reused for every strand."""
+    if strand_samples is not None:
+        outer_r = _probe_clip_outer_radius(strand_samples, params, config)
+    else:
+        outer_r = _embed_clip_outer_radius(config, params)
+    if frames is not None:
+        return _build_frame_aligned_embed_clip_shell(frames, config, outer_r=outer_r)
     return _swept_embed_clip_shell(
-        path, aux, config, max_radius=max_r, rotation_z=rotation_z
+        path, aux, config, max_radius=outer_r, rotation_z=rotation_z
     )
 
 
-def _clip_one_strand(strand: Solid, clip_solid) -> Solid:
-    """Intersect one strand with the embed shell, failing loudly on empty results."""
+def _clip_one_strand(
+    strand: Solid,
+    clip_shell: _EmbedClipShell,
+    *,
+    od_trim=None,
+    apply_inner_cut: bool = True,
+) -> Solid:
+    """Clip one strand to the embed annulus, failing loudly on empty results."""
+    outer, inner = clip_shell
     try:
-        result = intersect(strand, clip_solid)
+        result = intersect(strand, outer)
+        if od_trim is not None:
+            result = intersect(result, od_trim)
+        if apply_inner_cut:
+            result = result.cut(inner)
     except Exception as exc:
         raise RuntimeError("strand embed clip failed") from exc
     if result.Volume() <= 1e-3:
         raise RuntimeError("strand has no volume above embed shell after clip")
+    if od_trim is not None and result.Volume() > strand.Volume() * 1.05:
+        raise RuntimeError("strand OD trim produced invalid geometry")
     return result
 
 
@@ -601,12 +780,16 @@ def _clip_strands_to_embed_shell(
     params: BraidParams,
     *,
     rotation_z: float = 90.0,
+    od_trim=None,
 ) -> List[Solid]:
     """Drop strand material below the embed shell so the base tube OD stays round."""
     if not strands:
         return strands
+    path_length = path.Length()
+    num_frames = max(120, min(400, int(path_length / 1.0)))
+    frames = sample_path_frames(path, num_frames)
     clip_solid = _build_embed_clip_solid(
-        path, aux, config, params, rotation_z=rotation_z
+        path, aux, config, params, frames=frames, rotation_z=rotation_z
     )
     clipped: List[Solid] = []
     bar = tqdm(
@@ -617,7 +800,7 @@ def _clip_strands_to_embed_shell(
     )
     try:
         for strand in strands:
-            clipped.append(_clip_one_strand(strand, clip_solid))
+            clipped.append(_clip_one_strand(strand, clip_solid, od_trim=od_trim))
             bar.update(1)
     finally:
         bar.close()
@@ -630,12 +813,17 @@ def _clip_strands_to_embed_shell(
 
 _DEFAULT_FUSE_METHOD = "brep"
 _DEFAULT_FUSE_BATCH_SIZE = 12
+_DEFAULT_MESH_BATCH_SIZE = 2
 # Coarser than the final-export render tolerance on purpose: each strand B-rep
 # is ~10^6 triangles at 0.001 mm, so meshing 150 strands that finely OOMs.
 # ~0.05 mm is print-appropriate (SLA layer heights are ~0.05 mm) and ~36x
 # lighter per strand.
 _DEFAULT_MESH_TOLERANCE = 0.05
 _DEFAULT_MESH_ANGULAR_TOLERANCE = 0.3
+_DEFAULT_MESH_TOLERANCE_MAX = 0.3
+_DEFAULT_MESH_MAX_STRAND_FACES = 80_000
+_MESH_LOFT_SAMPLES_CAP = 500
+_MESH_MAX_CHUNKS_FACTOR = 2
 
 
 def _make_rss_logger(label: str) -> Optional[Callable[[str], None]]:
@@ -695,6 +883,8 @@ def _assemble_brep(
     *,
     total_strands: int,
     clip_solid,
+    od_trim=None,
+    apply_inner_cut: bool = True,
     batch_size: int,
     name: str,
     rss: Optional[Callable[[str], None]] = None,
@@ -717,7 +907,9 @@ def _assemble_brep(
     try:
         for strand in strands:
             if clip_solid is not None:
-                strand = _clip_one_strand(strand, clip_solid)
+                strand = _clip_one_strand(
+                    strand, clip_solid, od_trim=od_trim, apply_inner_cut=apply_inner_cut
+                )
             pending.append(strand)
             built += 1
             bar.update(1)
@@ -748,54 +940,205 @@ def _shape_to_trimesh(shape, *, tolerance: float, angular_tolerance: float):
     )
 
 
+def _tessellate_strand_mesh(
+    shape,
+    *,
+    tolerance: float,
+    angular_tolerance: float,
+    refine_tolerance: Optional[float] = None,
+):
+    """Tessellate a strand solid; retry finer when coarse clip meshes are non-volumetric."""
+    mesh = _shape_to_trimesh(
+        shape, tolerance=tolerance, angular_tolerance=angular_tolerance
+    )
+    if (
+        refine_tolerance is not None
+        and refine_tolerance < tolerance - 1e-9
+        and not mesh.is_volume
+    ):
+        mesh = _shape_to_trimesh(
+            shape, tolerance=refine_tolerance, angular_tolerance=angular_tolerance
+        )
+    if not mesh.is_volume:
+        raise RuntimeError("clipped strand did not tessellate to a volume mesh")
+    return mesh
+
+
+def _mesh_tolerance_ladder(
+    tolerance: float,
+    tolerance_max: float,
+    angular_tolerance: float,
+) -> List[Tuple[float, float]]:
+    """Increasing (linear_tol, angular_tol) pairs from config min to max."""
+    if tolerance_max < tolerance:
+        raise ValueError(
+            f"mesh_tolerance_max ({tolerance_max}) must be >= mesh_tolerance ({tolerance})"
+        )
+    ang_max = max(
+        angular_tolerance,
+        angular_tolerance * (tolerance_max / max(tolerance, 1e-9)),
+    )
+    ladder: List[Tuple[float, float]] = []
+    t = tolerance
+    while True:
+        span = tolerance_max - tolerance
+        frac = (t - tolerance) / span if span > 1e-12 else 1.0
+        ang = angular_tolerance + frac * (ang_max - angular_tolerance)
+        ladder.append((t, ang))
+        if t >= tolerance_max - 1e-12:
+            break
+        t = min(t * 1.5, tolerance_max)
+    if ladder[-1][0] < tolerance_max - 1e-12:
+        ladder.append((tolerance_max, ang_max))
+    return ladder
+
+
+def _reference_strand_face_count(
+    strand: Solid, *, tolerance: float, angular_tolerance: float
+) -> int:
+    s = strand.val() if hasattr(strand, "val") else strand
+    _, tris = s.tessellate(tolerance, angular_tolerance)
+    return len(tris)
+
+
+def _pick_mesh_tolerances(
+    reference_builder: Callable[[], Solid],
+    *,
+    tolerance: float,
+    angular_tolerance: float,
+    tolerance_max: float,
+    max_strand_faces: int,
+    name: str,
+) -> Tuple[float, float, int]:
+    """Pick the finest mesh tolerance that keeps a reference strand under the face budget.
+
+  Curved paths (e.g. quarter_turn) tessellate far denser than straight rods at
+  the same linear tolerance; probing a reference strand before the full build
+  avoids OOM from hundreds of thousands of faces per strand.
+    """
+    ladder = _mesh_tolerance_ladder(tolerance, tolerance_max, angular_tolerance)
+    ang_at_max = ladder[-1][1]
+    for tol, ang in ladder:
+        ref = reference_builder()
+        faces = _reference_strand_face_count(ref, tolerance=tol, angular_tolerance=ang)
+        del ref
+        _release()
+        if faces <= max_strand_faces:
+            logger.info(
+                "mesh tessellation: using tol=%.4f (config %.4f) — reference "
+                "strand faces=%d (budget %d)",
+                tol,
+                tolerance,
+                faces,
+                max_strand_faces,
+            )
+            return tol, ang, faces
+
+    ref = reference_builder()
+    faces = _reference_strand_face_count(
+        ref, tolerance=tolerance_max, angular_tolerance=ang_at_max
+    )
+    del ref
+    raise RuntimeError(
+        f"{name}: reference strand tessellates to {faces} faces even at "
+        f"mesh_tolerance_max={tolerance_max} (budget {max_strand_faces}). "
+        "Increase mesh_max_strand_faces or mesh_tolerance_max, or reduce "
+        "num_strands_per_dir."
+    )
+
+
+def _mesh_union(meshes: List[Any], *, name: str):
+    """Union watertight meshes via manifold; single mesh passes through."""
+    import trimesh
+
+    if len(meshes) == 1:
+        return meshes[0]
+    return trimesh.boolean.union(meshes, engine="manifold")
+
+
+def _mesh_map_reduce_one_round(chunks: List[Any], *, name: str) -> List[Any]:
+    """Pair adjacent chunk meshes and union each pair (one map-reduce round)."""
+    if len(chunks) <= 1:
+        return list(chunks)
+    nxt: List[Any] = []
+    i = 0
+    while i < len(chunks):
+        if i + 1 < len(chunks):
+            nxt.append(_mesh_union([chunks[i], chunks[i + 1]], name=name))
+            i += 2
+        else:
+            nxt.append(chunks[i])
+            i += 1
+    _release()
+    return nxt
+
+
+def _mesh_map_reduce_final(chunks: List[Any], *, name: str):
+    """Reduce chunk meshes to a single body via repeated map-reduce rounds."""
+    current = list(chunks)
+    while len(current) > 1:
+        current = _mesh_map_reduce_one_round(current, name=name)
+    if not current:
+        raise RuntimeError(f"{name}: mesh map-reduce produced no chunks")
+    return current[0]
+
+
+def _mesh_volume_bodies(mesh) -> int:
+    """Count connected watertight solids with positive volume (ignores sheet debris)."""
+    return sum(1 for p in mesh.split() if p.is_volume and p.volume > 1e-3)
+
+
+def _assert_single_volume_body(mesh, *, name: str) -> None:
+    """Raise unless the mesh is one printable solid (single volume component)."""
+    vol_parts = [p for p in mesh.split() if p.is_volume and p.volume > 1e-3]
+    n_vol = len(vol_parts)
+    if n_vol != 1:
+        raise RuntimeError(
+            f"{name}: mesh union produced {n_vol} volume bodies "
+            f"({mesh.body_count} graph components); strands do not form one solid"
+        )
+
+
 def _assemble_mesh(
     core,
     strands: Iterator[Solid],
     *,
     total_strands: int,
     clip_solid,
+    od_trim=None,
+    apply_inner_cut: bool = True,
+    refine_tolerance: Optional[float] = None,
     tolerance: float,
     angular_tolerance: float,
     batch_size: int,
     name: str,
     rss: Optional[Callable[[str], None]] = None,
 ):
-    """Stream tessellate -> per-strand mesh clip -> batched manifold union.
+    """Stream tessellate -> per-strand mesh clip -> batched union into the core mesh.
 
-    The manifold engine unions watertight meshes far faster and with far less
-    memory than OCC B-rep booleans, at the cost of producing a mesh rather than
-    a parametric solid (so STEP / SLA-optimize are unavailable on this path).
-
-    ``tolerance`` is deliberately coarser than the final-export render tolerance:
-    each braid strand B-rep carries ~10^6 triangles at 0.001 mm, so meshing 150
-    of them at that fidelity is hundreds of millions of triangles (an OOM). A
-    print-appropriate tolerance (~0.05 mm) keeps the union bounded.
+    Each batch of strand meshes is unioned into the core tube mesh immediately.
+    Strands only meet the rest of the braid through the core, so folding batches
+    into the core (rather than map-reducing strand-only chunks) is required for
+    a single connected body. Peak memory is bounded by ``core + batch_size``
+    strand meshes at the chosen tessellation tolerance.
     """
     import trimesh
 
-    running = _shape_to_trimesh(
+    accumulator = _shape_to_trimesh(
         core, tolerance=tolerance, angular_tolerance=angular_tolerance
     )
-    shell_mesh = None
-    if clip_solid is not None:
-        shell_mesh = _shape_to_trimesh(
-            clip_solid, tolerance=tolerance, angular_tolerance=angular_tolerance
-        )
 
     pending: List[Any] = []
     built = 0
 
-    def _flush() -> None:
-        nonlocal running, pending
+    def _flush_pending() -> None:
+        nonlocal accumulator, pending
         if not pending:
             return
-        batch = (
-            trimesh.boolean.union(pending, engine="manifold")
-            if len(pending) > 1
-            else pending[0]
-        )
-        running = trimesh.boolean.union([running, batch], engine="manifold")
+        batch = _mesh_union(pending, name=name) if len(pending) > 1 else pending[0]
         pending = []
+        _release()
+        accumulator = _mesh_union([accumulator, batch], name=name)
         _release()
 
     bar = tqdm(
@@ -806,40 +1149,38 @@ def _assemble_mesh(
     )
     try:
         for strand in strands:
-            strand_mesh = _shape_to_trimesh(
-                strand, tolerance=tolerance, angular_tolerance=angular_tolerance
+            if clip_solid is not None:
+                strand = _clip_one_strand(
+                    strand, clip_solid, od_trim=od_trim, apply_inner_cut=apply_inner_cut
+                )
+            strand_mesh = _tessellate_strand_mesh(
+                strand,
+                tolerance=tolerance,
+                angular_tolerance=angular_tolerance,
+                refine_tolerance=refine_tolerance,
             )
             del strand
-            if shell_mesh is not None:
-                strand_mesh = trimesh.boolean.intersection(
-                    [strand_mesh, shell_mesh], engine="manifold"
-                )
-                if strand_mesh.is_empty or strand_mesh.volume <= 1e-3:
-                    raise RuntimeError(
-                        "strand mesh has no volume above embed shell after clip"
-                    )
+            _release()
             pending.append(strand_mesh)
             built += 1
             bar.update(1)
             if len(pending) >= batch_size:
-                _flush()
+                _flush_pending()
                 if rss is not None:
                     rss(f"unioned {built}/{total_strands}")
-        _flush()
+        _flush_pending()
     finally:
         bar.close()
     if built != total_strands:
         raise RuntimeError(
             f"expected {total_strands} braid strands, built {built}"
         )
-    if not running.is_watertight:
+
+    result = accumulator
+    if not result.is_watertight:
         raise RuntimeError(f"{name}: mesh union is not watertight")
-    if running.body_count != 1:
-        raise RuntimeError(
-            f"{name}: mesh union produced {running.body_count} disconnected "
-            "bodies (strands do not touch)"
-        )
-    return running
+    _assert_single_volume_body(result, name=name)
+    return result
 
 
 class BraidedRopeModel:
@@ -878,6 +1219,9 @@ class BraidedRopeModel:
         batch_size = int(raw.get("fuse_batch_size", _DEFAULT_FUSE_BATCH_SIZE))
         if batch_size < 1:
             raise ValueError("braided_rope.fuse_batch_size must be >= 1")
+        mesh_batch_size = int(raw.get("mesh_batch_size", _DEFAULT_MESH_BATCH_SIZE))
+        if mesh_batch_size < 1:
+            raise ValueError("braided_rope.mesh_batch_size must be >= 1")
 
         # Centerline frames: denser when the path is curved or long.
         num_frames = max(120, min(400, int(path_length / 1.0)))
@@ -892,7 +1236,10 @@ class BraidedRopeModel:
                 ),
             ),
         )
+        if fuse_method == "mesh":
+            loft_samples = min(loft_samples, _MESH_LOFT_SAMPLES_CAP)
 
+        log_batch = mesh_batch_size if fuse_method == "mesh" else batch_size
         logger.info(
             "BraidedRopeModel: %s; base_face_type=%s; path_length=%.1f mm, "
             "loft_samples=%d, fuse_method=%s, batch_size=%d",
@@ -901,7 +1248,7 @@ class BraidedRopeModel:
             path_length,
             loft_samples,
             fuse_method,
-            batch_size,
+            log_batch,
         )
 
         rss = _make_rss_logger("BraidedRopeModel")
@@ -930,26 +1277,58 @@ class BraidedRopeModel:
         timings = _StrandTimings()
 
         clip_solid = None
+        refine_tolerance = None
+        apply_inner_clip = True
         if base_face_type in _SWEPT_BASE_FACE_TYPES:
             rotation_z = float((face_kwargs or {}).get("rotation_z", 90.0))
+            curved = _path_has_curvature(frames, path_length)
+            apply_inner_clip = not curved
             clip_solid = _build_embed_clip_solid(
-                path, aux, config, params, rotation_z=rotation_z
+                path,
+                aux,
+                config,
+                params,
+                frames=frames,
+                strand_samples=strand_samples,
+                rotation_z=rotation_z,
             )
+            if curved and fuse_method == "mesh":
+                refine_tolerance = float(
+                    raw.get("mesh_tolerance", _DEFAULT_MESH_TOLERANCE)
+                )
 
         strands = _iter_braid_strands(strand_samples, params, timings)
         name = config.name or "braid"
 
         if fuse_method == "mesh":
-            tol = float(raw.get("mesh_tolerance", _DEFAULT_MESH_TOLERANCE))
-            ang = float(raw.get("mesh_angular_tolerance", _DEFAULT_MESH_ANGULAR_TOLERANCE))
+            tol_cfg = float(raw.get("mesh_tolerance", _DEFAULT_MESH_TOLERANCE))
+            ang_cfg = float(
+                raw.get("mesh_angular_tolerance", _DEFAULT_MESH_ANGULAR_TOLERANCE)
+            )
+            tol_max = float(raw.get("mesh_tolerance_max", _DEFAULT_MESH_TOLERANCE_MAX))
+            max_faces = int(raw.get("mesh_max_strand_faces", _DEFAULT_MESH_MAX_STRAND_FACES))
+
+            def _reference_strand() -> Solid:
+                return _build_braid_strand(strand_samples, params, 0.0, -1, timings)
+
+            tol, ang, _ = _pick_mesh_tolerances(
+                _reference_strand,
+                tolerance=tol_cfg,
+                angular_tolerance=ang_cfg,
+                tolerance_max=tol_max,
+                max_strand_faces=max_faces,
+                name=name,
+            )
             result = _assemble_mesh(
                 core,
                 strands,
                 total_strands=total_strands,
                 clip_solid=clip_solid,
+                apply_inner_cut=apply_inner_clip,
+                refine_tolerance=refine_tolerance,
                 tolerance=tol,
                 angular_tolerance=ang,
-                batch_size=batch_size,
+                batch_size=mesh_batch_size,
                 name=name,
                 rss=rss,
             )
@@ -959,6 +1338,7 @@ class BraidedRopeModel:
                 strands,
                 total_strands=total_strands,
                 clip_solid=clip_solid,
+                apply_inner_cut=apply_inner_clip,
                 batch_size=batch_size,
                 name=name,
                 rss=rss,

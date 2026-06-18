@@ -273,6 +273,63 @@ class ClampSettings:
                 raise ValueError(f"clamp.{k} must be >= 0 (got {getattr(self, k)})")
 
 
+class FingerSensorHolderSettings:
+    """Settings for the finger pulse-sensor holder accessory part."""
+
+    def __init__(self, data: Dict[str, Any]):
+        data = data or {}
+        defaults = {
+            "holder_width": 30.00,
+            "holder_length": 67.00,
+            "base_thickness": 4.48,
+            "wall_thickness": 2.29,
+            "wall_full_height": 20.70,
+            "rear_wall_low_height": 8.45,
+            "rear_transition_length": 23.57,
+            "front_transition_length": 4.90,
+            "hinge_axis_from_rear": 22.70,
+            "hinge_axis_height_above_base": 14.40,
+            "hinge_rod_diameter": 3.17,
+            "hinge_outer_diameter": 5.02,
+            "pedestal_front_offset": 9.50,
+            "pedestal_width": 17.00,
+            "pedestal_front_height": 10.00,
+            "sensor_pcb_diameter": 15.80,
+            "sensor_max_thickness": 3.60,
+            "sensor_pocket_diameter": 16.20,
+            "sensor_pocket_depth": 3.70,
+            "sensor_exposed_opening_diameter": 15.00,
+            "cable_channel_width": 4.50,
+            "cable_channel_depth": 2.50,
+            "general_fillet_radius": 1.00,
+            "front_transition_radius": 2.00,
+            "rear_transition_radius": 2.50,
+            "pedestal_length": 32.00,
+            "pedestal_rear_height_above_base": 6.00,
+            "finger_trough_width": 15.00,
+            "finger_trough_depth": 3.50,
+            "finger_trough_length": 28.00,
+            "finger_stop_radius": 8.00,
+            "finger_trough_front_blend_length": 5.00,
+            "sensor_center_y": 33.50,
+            "sensor_face_raise_mm": 0.25,
+            "hinge_rod_clearance_mm": 0.15,
+            "retention_plate_clearance_mm": 0.25,
+            "retention_plate_thickness_mm": 1.50,
+            "retention_tab_count": 3,
+            "retention_tab_width_mm": 2.00,
+            "retention_tab_depth_mm": 0.80,
+            "cable_exit_y": 62.00,
+            "strain_relief_pocket_diameter": 6.00,
+            "strain_relief_pocket_depth": 1.50,
+        }
+        for key, default in defaults.items():
+            if key == "retention_tab_count":
+                setattr(self, key, int(data.get(key, default)))
+            else:
+                setattr(self, key, float(data.get(key, default)))
+
+
 class TubeSettings:
     """Active face configuration built from resolved face_settings for the selected face_type."""
 
@@ -716,6 +773,9 @@ class Config:
         self.max_print_bounds = MaxPrintBoundsSettings(config_data.get("max_print_bounds", {}))
         self.tube_gap = TubeGapSettings(config_data.get("tube_gap", {}))
         self.clamp = ClampSettings(config_data.get("clamp", {}))
+        self.finger_sensor_holder = FingerSensorHolderSettings(
+            config_data.get("finger_sensor_holder", {})
+        )
         self.print_optimization = PrintOptimizationSettings(
             config_data.get("print_optimization", {})
         )

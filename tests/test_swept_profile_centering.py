@@ -87,6 +87,8 @@ def test_embed_clip_shell_concentric_with_path() -> None:
     )
     params = _params_from_config(config, base_face_type="led_circle_tube")
     path = spline([(0, 0, 0), (0, 0, 50)])
-    max_r = _strand_envelope_radius(params) + 15.0
-    shell = _swept_embed_clip_shell(path, None, config, max_radius=max_r)
-    _assert_centered(shell, "embed clip shell")
+    from led_knots.core.tube_models.braided_rope import _embed_clip_outer_radius
+
+    outer_r = _embed_clip_outer_radius(config, params)
+    outer, _inner = _swept_embed_clip_shell(path, None, config, max_radius=outer_r)
+    _assert_centered(outer, "embed clip shell")

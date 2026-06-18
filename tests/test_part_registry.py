@@ -7,7 +7,7 @@ import pytest
 from led_knots.parts import registry
 
 
-EXPECTED_PART_TYPES = {"hang_clamp", "planet_spacer"}
+EXPECTED_PART_TYPES = {"finger_sensor_holder", "hang_clamp", "planet_spacer"}
 
 
 def test_list_part_types_discovers_all_modules():

@@ -26,10 +26,9 @@ def build(config: Config) -> None:
     knot_points = scale_pyknot_points(
         k.points,
         width=config.output_bounds.width,
-        height=config.output_bounds.width,
-        length=config.output_bounds.height,
-        padding=config.tube_settings.outer_radius,
-        preserve_aspect_ratio=False,
+        height=config.output_bounds.height,
+        length=config.output_bounds.length,
+        padding=config.tube_settings.outer_radius
     )
 
     path = spline(knot_points[:-1])

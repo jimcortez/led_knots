@@ -1,0 +1,22 @@
+knot_type: rod
+
+# -----------------------------------------------------------------------------
+# Output bounds: bounding box for knot path scaling
+# -----------------------------------------------------------------------------
+output_bounds:
+  width: 200    # mm
+  length: 200   # mm
+  height: 350   # mm
+
+face_type: led_circle_tube
+
+max_print_bounds:
+  enabled: true
+
+  # Elegoo Saturn 4 Ultra 16k build volume
+  width: 200    # mm
+  length: 110   # mm
+  height: 200     # mm
+  
+  joint:
+    enabled: true

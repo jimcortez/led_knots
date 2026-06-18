@@ -171,6 +171,47 @@ def production_strands():
     return config, params, path, cw, ccw
 
 
+def test_braid_strand_curved_path_high_twist_phases() -> None:
+    """High-twist strands on a curved path must pass the volume guard.
+
+    Regression: uncapped shell sewing with the default 32-section chunk size
+    collapsed some strands on the quarter-turn path (volume ~1 mm^3 vs ~18 mm^3
+    expected). Smaller chunk fallbacks must recover without changing geometry.
+    """
+    config = SimpleNamespace(
+        tube_settings=_tube_settings(
+            face_type="braided_rope_tube",
+            braided_rope={
+                "num_strands_per_dir": 75,
+                "pack_factor": 0.7,
+            },
+        )
+    )
+    params = _params_from_config(config, base_face_type="led_circle_tube")
+    path = spline(
+        [(0, 0, 0), (0, 100, 100)],
+        tgts=[(0, 0, 1), (0, 1, 0)],
+    )
+    path_length = path.Length()
+    frames = sample_path_frames(path, max(120, min(400, int(path_length))))
+    loft_samples = max(
+        240,
+        min(
+            1500,
+            math.ceil(
+                params.samples_per_period * params.N * path_length / params.pitch
+            ),
+        ),
+    )
+    samples = _sample_strand_centerline(frames, path_length, params, loft_samples)
+    # i=30 and i=32 failed with chunk=32 only on the quarter-turn geometry.
+    for i in (30, 32):
+        phase = i * (2.0 * math.pi / params.num_strands_per_dir)
+        strand = _build_braid_strand(samples, params, phase, -1)
+        assert strand.Volume() > 1.0
+        assert len(strand.Solids()) == 1
+
+
 def test_braid_strand_volumes_symmetric_both_directions(production_strands) -> None:
     """CW and CCW strands are mirror geometry and must have matching volume.
 
@@ -383,5 +424,123 @@ def test_build_mesh_watertight_and_matches_brep_volume() -> None:
     mesh = _build_with_model(_debug_build_config("mesh", n=4))
     assert isinstance(mesh, trimesh.Trimesh)
     assert mesh.is_watertight
-    assert mesh.body_count == 1
+    from led_knots.core.tube_models.braided_rope import _mesh_volume_bodies
+
+    assert _mesh_volume_bodies(mesh) == 1
     assert mesh.volume == pytest.approx(brep.Volume(), rel=0.05)
+
+
+# ---------------------------------------------------------------------------
+# Curved-path mesh memory (map-reduce + face budget)
+# ---------------------------------------------------------------------------
+
+def test_quarter_turn_strand_face_budget() -> None:
+    """Curved quarter_turn strands auto-coarsen under mesh_max_strand_faces."""
+    import sys
+
+    from led_knots.core.config import Config
+    from led_knots.core.path_frames import sample_path_frames
+    from led_knots.core.tube_models.braided_rope import (
+        _base_face_type,
+        _build_braid_strand,
+        _params_from_config,
+        _pick_mesh_tolerances,
+        _reference_strand_face_count,
+        _sample_strand_centerline,
+        _StrandTimings,
+        _DEFAULT_MESH_MAX_STRAND_FACES,
+        _DEFAULT_MESH_TOLERANCE,
+        _DEFAULT_MESH_TOLERANCE_MAX,
+        _DEFAULT_MESH_ANGULAR_TOLERANCE,
+        _MESH_LOFT_SAMPLES_CAP,
+    )
+
+    sys.argv = ["render-knot", "knot_configs/quarter_turn_braided.yaml"]
+    cfg = Config()
+    path = spline(
+        [(0, 0, 0), (0, cfg.output_bounds.height, cfg.output_bounds.height)],
+        tgts=[(0, 0, 1), (0, 1, 0)],
+    )
+    base = _base_face_type(cfg)
+    params = _params_from_config(cfg, base_face_type=base)
+    plen = path.Length()
+    loft = min(
+        max(
+            240,
+            min(
+                1500,
+                math.ceil(params.samples_per_period * params.N * plen / params.pitch),
+            ),
+        ),
+        _MESH_LOFT_SAMPLES_CAP,
+    )
+    frames = sample_path_frames(path, max(120, min(400, int(plen / 1.0))))
+    samples = _sample_strand_centerline(frames, plen, params, loft)
+
+    def _reference_strand():
+        return _build_braid_strand(samples, params, 0.0, -1, _StrandTimings())
+
+    tol, ang, faces = _pick_mesh_tolerances(
+        _reference_strand,
+        tolerance=_DEFAULT_MESH_TOLERANCE,
+        angular_tolerance=_DEFAULT_MESH_ANGULAR_TOLERANCE,
+        tolerance_max=_DEFAULT_MESH_TOLERANCE_MAX,
+        max_strand_faces=_DEFAULT_MESH_MAX_STRAND_FACES,
+        name="quarter_turn",
+    )
+    assert faces <= _DEFAULT_MESH_MAX_STRAND_FACES
+    assert tol > _DEFAULT_MESH_TOLERANCE
+    ref = _reference_strand()
+    assert (
+        _reference_strand_face_count(ref, tolerance=tol, angular_tolerance=ang)
+        <= _DEFAULT_MESH_MAX_STRAND_FACES
+    )
+
+
+def test_mesh_map_reduce_watertight() -> None:
+    """Map-reduce mesh union of overlapping boxes yields one watertight volume body."""
+    import trimesh
+
+    from led_knots.core.tube_models.braided_rope import (
+        _assemble_mesh,
+        _assert_single_volume_body,
+        _mesh_map_reduce_final,
+        _mesh_map_reduce_one_round,
+    )
+
+    boxes = [
+        trimesh.creation.box(extents=(2.0, 2.0, 2.0)).apply_translation((x, 0, 0))
+        for x in (0, 1, 2, 3)
+    ]
+    reduced = _mesh_map_reduce_final(boxes, name="boxes")
+    assert reduced.is_watertight
+    _assert_single_volume_body(reduced, name="boxes")
+
+    # one round halves four chunks to two
+    four = list(boxes)
+    one_round = _mesh_map_reduce_one_round(four, name="boxes")
+    assert len(one_round) == 2
+
+
+def test_mesh_map_reduce_peak_chunks_bounded() -> None:
+    """Chunk list high-water mark stays within 2 * mesh_batch_size during streaming."""
+    import trimesh
+
+    from led_knots.core.tube_models.braided_rope import (
+        _MESH_MAX_CHUNKS_FACTOR,
+        _mesh_map_reduce_one_round,
+    )
+
+    mesh_batch_size = 2
+    max_chunks = max(2, _MESH_MAX_CHUNKS_FACTOR * mesh_batch_size)
+    chunks = [trimesh.creation.box(extents=(2.0, 2.0, 2.0))]
+    peak = len(chunks)
+    for i in range(12):
+        chunks.append(
+            trimesh.creation.box(extents=(1.0, 1.0, 1.0)).apply_translation((i, 0, 0))
+        )
+        while len(chunks) > max_chunks:
+            chunks = _mesh_map_reduce_one_round(chunks, name="bounded")
+        peak = max(peak, len(chunks))
+    assert peak <= max_chunks
+    assert max_chunks == 4

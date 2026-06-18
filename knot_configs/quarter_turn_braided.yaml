@@ -12,7 +12,7 @@ face_settings:
   # Braided-rope sleeve along the path (Step 4).
   braided_rope_tube:
     braided_rope:
-      num_strands_per_dir: 75
+      num_strands_per_dir: 50
       # 150 strands is impractically slow to fuse as B-rep (OCC booleans scale
       # ~quadratically with the growing accumulator). The mesh path unions
       # watertight strand meshes via manifold: fast and memory-bounded. Output
@@ -20,3 +20,4 @@ face_settings:
       # unavailable for this config; switch to fuse_method: brep if you need them
       # (at a lower strand count).
       fuse_method: mesh
+      mesh_batch_size: 7

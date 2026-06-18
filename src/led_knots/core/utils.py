@@ -314,12 +314,14 @@ def draw_part(path, config, aux=None, **face_kwargs):
                 config.name or "part",
             )
             mp = config.max_print_bounds
-            if mp.width > 0 and mp.length > 0 and mp.height > 0:
+            if mp.enabled:
                 bed_bounds = mp
-                bed_clearance = float(getattr(mp, "clearance_mm", 2.0))
+                bed_clearance = float(mp.clearance_mm)
             else:
+                # output_bounds sizing already reserves tube padding on every
+                # axis; do not subtract an extra bed margin here.
                 bed_bounds = config.output_bounds
-                bed_clearance = 2.0
+                bed_clearance = 0.0
             with config.render_stats.record_stage("draw_part.optimize"):
                 result, report = optimize_part(
                     result,

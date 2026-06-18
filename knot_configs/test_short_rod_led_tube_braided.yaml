@@ -15,9 +15,6 @@ face_settings:
   braided_rope_tube:
     braided_rope:
       num_strands_per_dir: 75
-      braid_tightness: 1.0
-      pack_factor: 0.9
-      weave_amplitude_factor: 1.0
       # 150 strands is impractically slow to fuse as B-rep (OCC booleans scale
       # ~quadratically with the growing accumulator). The mesh path unions
       # watertight strand meshes via manifold: fast and memory-bounded. Output

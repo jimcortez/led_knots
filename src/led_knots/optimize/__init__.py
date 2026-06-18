@@ -48,6 +48,10 @@ __all__ = [
 
 _PartT = Union[cq.Workplane, cq.Solid, cq.Compound, cq.Assembly]
 
+# Coarse STL tessellation in _to_trimesh can inflate the orientation mesh AABB
+# slightly past the analytically sized output_bounds envelope.
+_BED_FIT_MESH_TOLERANCE_MM = 0.5
+
 
 def _to_trimesh(part: _PartT, *, name: str = "part") -> trimesh.Trimesh:
     """Tessellate a CadQuery part to a trimesh ``Trimesh`` via temp STL.
@@ -219,10 +223,11 @@ def _filter_candidates_by_bed(
     for cand in candidates:
         ext = _compute_rotated_extents(mesh, cand.matrix)
         sorted_ext = sorted(ext, reverse=True)
+        tol = _BED_FIT_MESH_TOLERANCE_MM
         fits = (
-            sorted_ext[0] <= bed[0]
-            and sorted_ext[1] <= bed[1]
-            and sorted_ext[2] <= bed[2]
+            sorted_ext[0] <= bed[0] + tol
+            and sorted_ext[1] <= bed[1] + tol
+            and sorted_ext[2] <= bed[2] + tol
         )
         # OrientationCandidate is frozen — rebuild with the new fields.
         out.append(
