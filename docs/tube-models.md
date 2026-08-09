@@ -77,6 +77,7 @@ and is a plain module-level `Dict[str, TubeModel]`:
 _REGISTRY: Dict[str, TubeModel] = {
     "led_circle": SweptFaceModel("led_circle"),
     "led_circle_tube": SweptFaceModel("led_circle_tube"),
+    "led_circle_quad_tube": SweptFaceModel("led_circle_quad_tube"),
     "solid_circle": SweptFaceModel("solid_circle"),
     "square": SweptFaceModel("square"),
 }
@@ -99,6 +100,7 @@ Built-in registry contents:
 | --- | --- | --- |
 | `led_circle` | `SweptFaceModel("led_circle")` | Annular outer ring + LED-strip oval cavity + two connectors, swept along the path. |
 | `led_circle_tube` | `SweptFaceModel("led_circle_tube")` | Annular outer ring + concentric inner tube (for wires) + two radial connectors. |
+| `led_circle_quad_tube` | `SweptFaceModel("led_circle_quad_tube")` | Same as `led_circle_tube` but with four equally-spaced radial connectors. |
 | `solid_circle` | `SweptFaceModel("solid_circle")` | Plain filled disc, swept. The dumb base case used by other models. |
 | `square` | `SweptFaceModel("square")` | Plain filled square, swept. |
 | `pyramid_studded` | `PyramidStuddedModel()` | A base swept tube with discrete 4-sided pyramidal solids placed on its outer surface. |
@@ -164,6 +166,21 @@ leave a positive gap for the connectors.
 
 Pick this for the default LED-knot use case where wires (not a strip) run
 through the core.
+
+### `led_circle_quad_tube`
+
+Identical to `led_circle_tube` except the center tube is held by **four**
+equally-spaced radial connectors (the opposed pair plus a perpendicular pair)
+instead of two. All four connectors share `connector_width`. Implemented by
+`create_led_circle_quad_tube_face` in
+[led_circle.py](../src/led_knots/core/led_circle.py), a thin wrapper over
+`create_led_circle_tube_face(connector_count=4)`.
+
+Config keys are the same as `face_settings.led_circle_tube`; the stock config
+block simply does `inherit_from: led_circle_tube`.
+
+Pick this when the inner wire tube needs stiffer, orientation-independent
+support at the cost of slightly more resin blocking the annular channel.
 
 ### `solid_circle`
 
@@ -314,10 +331,11 @@ factory and kwargs-builder method name from `_FACE_FACTORIES`:
 
 ```python
 _FACE_FACTORIES = {
-    "led_circle":      (create_led_circle_face,      "to_led_circle_face_kwargs"),
-    "led_circle_tube": (create_led_circle_tube_face, "to_led_circle_tube_face_kwargs"),
-    "solid_circle":    (create_solid_circle_face,    "to_led_circle_face_kwargs"),
-    "square":          (create_square_face,          "to_led_circle_face_kwargs"),
+    "led_circle":           (create_led_circle_face,           "to_led_circle_face_kwargs"),
+    "led_circle_tube":      (create_led_circle_tube_face,      "to_led_circle_tube_face_kwargs"),
+    "led_circle_quad_tube": (create_led_circle_quad_tube_face, "to_led_circle_tube_face_kwargs"),
+    "solid_circle":         (create_solid_circle_face,         "to_led_circle_face_kwargs"),
+    "square":               (create_square_face,               "to_led_circle_face_kwargs"),
 }
 ```
 

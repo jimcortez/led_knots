@@ -512,20 +512,24 @@ def create_led_circle_tube_face(
     inner_tube_diameter: float,
     inner_tube_wall_thickness: float,
     connector_width: float = 1.0,
+    connector_count: int = 2,
     orient_to_path: Wire = None,
     rotation_z: float = 90.0,
 ):
     """
     Create a 2D cross-section with an outer ring, a central circular tube
-    (annulus), and two connectors joining the inner edge of the outer ring
-    to the outer edge of the center tube.
+    (annulus), and `connector_count` equally-spaced connectors joining the
+    inner edge of the outer ring to the outer edge of the center tube.
 
     Args:
         outer_radius: Outer radius of the main ring in mm.
         wall_thickness: Wall thickness of the outer ring in mm.
         inner_tube_diameter: Inner diameter (hole) of the center tube in mm.
         inner_tube_wall_thickness: Wall thickness around the center hole in mm.
-        connector_width: Width of the two radial connectors in mm.
+        connector_width: Width of each radial connector in mm.
+        connector_count: Number of equally-spaced radial connectors. Default 2
+                         (opposed pair); see create_led_circle_quad_tube_face
+                         for the 4-connector variant.
         orient_to_path: Optional Wire — if provided, orient the result to the
                         path's start point and tangent.
         rotation_z: Rotation in degrees around Z (about profile center).
@@ -540,6 +544,11 @@ def create_led_circle_tube_face(
         raise ValueError(f"inner_tube_wall_thickness must be > 0 (got {inner_tube_wall_thickness})")
     if connector_width <= 0:
         raise ValueError(f"connector_width must be > 0 (got {connector_width})")
+    if int(connector_count) != connector_count or connector_count < 2:
+        raise ValueError(
+            f"connector_count must be an integer >= 2 (got {connector_count})"
+        )
+    connector_count = int(connector_count)
 
     inner_radius = outer_radius - wall_thickness
     if inner_radius <= 0:
@@ -578,18 +587,51 @@ def create_led_circle_tube_face(
     connector_length = connector_top_y - connector_bottom_y
     connector_center_y = (connector_top_y + connector_bottom_y) / 2.0
 
-    top_connector_base = plane(connector_width, connector_length).moved(y=connector_center_y)
-    top_connector = rotate_around_center(top_connector_base)
-    bottom_connector_base = plane(connector_width, connector_length).moved(y=-connector_center_y)
-    bottom_connector = rotate_around_center(bottom_connector_base)
+    # Equally-spaced connectors: build one rectangle on +Y, then rotate copies
+    # about the profile center (rotation_z phase included, matching the ring).
+    step_deg = 360.0 / connector_count
+    connector_base = plane(connector_width, connector_length).moved(y=connector_center_y)
+    connectors = []
+    for i in range(connector_count):
+        angle = rotation_z + i * step_deg
+        connectors.append(
+            connector_base if angle % 360.0 == 0 else connector_base.moved(rz=angle)
+        )
 
-    result = clean(fuse(outer_ring, center_tube, top_connector, bottom_connector))
+    result = clean(fuse(outer_ring, center_tube, *connectors))
 
     if orient_to_path is not None:
         face_plane = Plane(origin=orient_to_path.startPoint(), normal=orient_to_path.tangentAt(0))
         result = result.moved(Location(face_plane))
 
     return result
+
+
+def create_led_circle_quad_tube_face(
+    outer_radius: float,
+    wall_thickness: float,
+    inner_tube_diameter: float,
+    inner_tube_wall_thickness: float,
+    connector_width: float = 1.0,
+    orient_to_path: Wire = None,
+    rotation_z: float = 90.0,
+):
+    """
+    Same cross-section as create_led_circle_tube_face, but the center tube is
+    held by four equally-spaced connectors (the opposed pair plus a
+    perpendicular pair) instead of two. All four connectors share
+    `connector_width`; every other parameter behaves identically.
+    """
+    return create_led_circle_tube_face(
+        outer_radius=outer_radius,
+        wall_thickness=wall_thickness,
+        inner_tube_diameter=inner_tube_diameter,
+        inner_tube_wall_thickness=inner_tube_wall_thickness,
+        connector_width=connector_width,
+        connector_count=4,
+        orient_to_path=orient_to_path,
+        rotation_z=rotation_z,
+    )
 
 
 def create_solid_circle_face(

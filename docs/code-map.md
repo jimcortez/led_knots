@@ -16,7 +16,7 @@ Shared CAD pipeline: config loading, path framing, tube sweeping, segmentation, 
 | [`cache_utils.py`](../src/led_knots/core/cache_utils.py) | Builds deterministic cache filenames for preview STLs from part name, sampled path geometry, face kwargs, and config. |
 | [`color_palette.py`](../src/led_knots/core/color_palette.py) | Harmonious color palette + `ColoredShape` wrapper + assembly helpers so cadquery-web-viewer renders each part in a distinct color. |
 | [`config.py`](../src/led_knots/core/config.py) | Loads `config.yaml` (+ `config.local.yaml` overrides), validates face types, exposes a typed config object; see [Configuration reference](configuration.md). |
-| [`led_circle.py`](../src/led_knots/core/led_circle.py) | 2D cross-section factories used by the swept tube models: `create_led_circle_face`, `create_led_circle_tube_face`, `create_solid_circle_face`, `create_square_face`, plus geometry validation. |
+| [`led_circle.py`](../src/led_knots/core/led_circle.py) | 2D cross-section factories used by the swept tube models: `create_led_circle_face`, `create_led_circle_tube_face`, `create_led_circle_quad_tube_face`, `create_solid_circle_face`, `create_square_face`, plus geometry validation. |
 | [`path_frames.py`](../src/led_knots/core/path_frames.py) | Parallel-transported frames along a centerline `Wire`; single source of truth consumed by every tube model. |
 | [`path_utils.py`](../src/led_knots/core/path_utils.py) | Path curvature sampling, optimal twist computation, and ribbon / variable-twist auxiliary-spine builders. See [Path framing](paths.md). |
 | [`preview.py`](../src/led_knots/core/preview.py) | Off-screen GLB / STL → PNG rendering via trimesh + pyrender + Pillow. |
@@ -36,7 +36,7 @@ Registry of `face_type → TubeModel` implementations. A `TubeModel` turns a cen
 | [`_base.py`](../src/led_knots/core/tube_models/_base.py) | Runtime-checkable `TubeModel` `Protocol` defining the `build(path, aux, config, ...)` contract. |
 | [`braided_rope.py`](../src/led_knots/core/tube_models/braided_rope.py) | Academic-grounded (He et al. 2020; Kyosev) braided-rope sleeve along the centerline using shared `path_frames`. |
 | [`pyramid_studded.py`](../src/led_knots/core/tube_models/pyramid_studded.py) | Smooth base sweep with discrete 4-sided pyramid solids placed in axial rows on the outer surface; returned as a `Compound`. |
-| [`swept_face.py`](../src/led_knots/core/tube_models/swept_face.py) | Single 2D face swept along the path; backs the `led_circle`, `led_circle_tube`, `solid_circle`, and `square` registry entries. |
+| [`swept_face.py`](../src/led_knots/core/tube_models/swept_face.py) | Single 2D face swept along the path; backs the `led_circle`, `led_circle_tube`, `led_circle_quad_tube`, `solid_circle`, and `square` registry entries. |
 
 ## src/led_knots/knots/
 

@@ -437,6 +437,7 @@ _PARAM_KEYS = {
 _SWEPT_BASE_FACE_TYPES = frozenset({
     "led_circle",
     "led_circle_tube",
+    "led_circle_quad_tube",
     "solid_circle",
     "square",
 })

@@ -3,7 +3,7 @@ Single-2D-face-swept-along-path tube model.
 
 Wraps the simple `create_*_face` factories and performs one `sweep(face, path)`
 to produce a smooth tube. Covers `led_circle`, `led_circle_tube`,
-`solid_circle`, and `square`.
+`led_circle_quad_tube`, `solid_circle`, and `square`.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from cadquery.func import sweep
 
 from ..led_circle import (
     create_led_circle_face,
+    create_led_circle_quad_tube_face,
     create_led_circle_tube_face,
     create_solid_circle_face,
     create_square_face,
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 _FACE_FACTORIES = {
     "led_circle": (create_led_circle_face, "to_led_circle_face_kwargs"),
     "led_circle_tube": (create_led_circle_tube_face, "to_led_circle_tube_face_kwargs"),
+    "led_circle_quad_tube": (create_led_circle_quad_tube_face, "to_led_circle_tube_face_kwargs"),
     "solid_circle": (create_solid_circle_face, "to_led_circle_face_kwargs"),
     "square": (create_square_face, "to_led_circle_face_kwargs"),
 }

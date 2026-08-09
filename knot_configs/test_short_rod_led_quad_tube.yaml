@@ -1,0 +1,11 @@
+knot_type: rod
+
+# -----------------------------------------------------------------------------
+# Output bounds: bounding box for knot path scaling
+# -----------------------------------------------------------------------------
+output_bounds:
+  width: 200    # mm
+  length: 200   # mm
+  height: 100   # mm
+
+face_type: led_circle_quad_tube

@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 _FACE_TYPES_WITH_CONNECTORS = frozenset({
     "led_circle",
     "led_circle_tube",
+    "led_circle_quad_tube",
 })
 
 
@@ -120,11 +121,11 @@ def tag_connector_faces(
     wall_thickness = float(tube_settings.wall_thickness)
     outer_ring_inner_r = outer_radius - wall_thickness
 
-    if face_type == "led_circle_tube":
+    if face_type in ("led_circle_tube", "led_circle_quad_tube"):
         if tube_settings.inner_tube_diameter is None or tube_settings.inner_tube_wall_thickness is None:
             return FaceTagResult(
                 connector_mask=empty,
-                note="led_circle_tube missing inner_tube_* settings",
+                note=f"{face_type} missing inner_tube_* settings",
             )
         inner_feature_r = (
             float(tube_settings.inner_tube_diameter) / 2.0

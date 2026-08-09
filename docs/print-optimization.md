@@ -95,7 +95,7 @@ Face tagging ([optimize/face_tagging.py](../src/led_knots/optimize/face_tagging.
 
 The classifier is purely geometric. For each face centroid it finds the nearest path sample, builds a local frame `(T, R_hat, B_hat = T × R_hat)`, and flags faces whose normal aligns with the azimuthal direction `B_hat` (cosine threshold `0.7`, i.e. within ~45° of pure azimuthal). A radial-gap gate also requires the face to sit between the inner feature wall and the outer-ring inner wall, which filters out fillets and end-cap remnants that happen to have an azimuthal normal.
 
-Only the `led_circle` and `led_circle_tube` face types have connectors ([face_tagging.py:31](../src/led_knots/optimize/face_tagging.py#L31)). Any other face type (`solid_circle`, `square`, `pyramid_studded`, `braided_rope`, ...) returns an empty connector mask with `note="face type ... has no connectors"`, and the connector bonus is effectively zero.
+Only the `led_circle`, `led_circle_tube`, and `led_circle_quad_tube` face types have connectors ([face_tagging.py:31](../src/led_knots/optimize/face_tagging.py#L31)). Any other face type (`solid_circle`, `square`, `pyramid_studded`, `braided_rope`, ...) returns an empty connector mask with `note="face type ... has no connectors"`, and the connector bonus is effectively zero.
 
 In the annotated PNG output, the role colors are defined in [report.py:27-30](../src/led_knots/optimize/report.py#L27):
 

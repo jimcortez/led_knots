@@ -28,6 +28,7 @@ def _resolve_config_path(project_root: Path, path_str: str) -> Path:
 VALID_FACE_TYPES = (
     'led_circle',
     'led_circle_tube',
+    'led_circle_quad_tube',
     'solid_circle',
     'square',
     'pyramid_studded',
@@ -412,11 +413,11 @@ class TubeSettings:
         """
         if self.inner_tube_diameter is None:
             raise ValueError(
-                "inner_tube_diameter must be set in face_settings for face_type 'led_circle_tube'"
+                f"inner_tube_diameter must be set in face_settings for face_type {self.face_type!r}"
             )
         if self.inner_tube_wall_thickness is None:
             raise ValueError(
-                "inner_tube_wall_thickness must be set in face_settings for face_type 'led_circle_tube'"
+                f"inner_tube_wall_thickness must be set in face_settings for face_type {self.face_type!r}"
             )
         base_kwargs = {
             'outer_radius': self.outer_radius,

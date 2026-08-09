@@ -30,6 +30,7 @@ from .core import (
     build_variable_twist_spine,
     # LED Circle creation
     create_led_circle_face,
+    create_led_circle_quad_tube_face,
     create_led_circle_tube_face,
     create_solid_circle_face,
     create_square_face,
@@ -48,6 +49,7 @@ __all__ = [
     'build_variable_twist_spine',
     # LED Circle creation
     'create_led_circle_face',
+    'create_led_circle_quad_tube_face',
     'create_led_circle_tube_face',
     'create_solid_circle_face',
     'create_square_face',

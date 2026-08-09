@@ -26,6 +26,7 @@ from .path_utils import (
 
 from .led_circle import (
     create_led_circle_face,
+    create_led_circle_quad_tube_face,
     create_led_circle_tube_face,
     create_solid_circle_face,
     create_square_face,
@@ -49,6 +50,7 @@ __all__ = [
     'build_ribbon_aux_spine',
     # LED Circle
     'create_led_circle_face',
+    'create_led_circle_quad_tube_face',
     'create_led_circle_tube_face',
     'create_solid_circle_face',
     'create_square_face',

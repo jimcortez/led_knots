@@ -128,7 +128,7 @@ face_type: led_circle_tube
 
 | Key | Type | Default | Units | Description |
 | --- | --- | --- | --- | --- |
-| `face_type` | string enum | `led_circle` | — | One of `led_circle`, `led_circle_tube`, `solid_circle`, `square`, `pyramid_studded`, `braided_rope`. Anything else raises `ValueError`. |
+| `face_type` | string enum | `led_circle` | — | One of `led_circle`, `led_circle_tube`, `led_circle_quad_tube`, `solid_circle`, `square`, `pyramid_studded`, `braided_rope`, `braided_rope_tube`. Anything else raises `ValueError`. |
 
 The enum is defined by `VALID_FACE_TYPES` in
 [config.py:19](../src/led_knots/core/config.py#L19). See
@@ -158,6 +158,9 @@ face_settings:
     inner_tube_diameter: 10
     inner_tube_wall_thickness: 0.5
     connector_width: 0.5
+
+  led_circle_quad_tube:
+    inherit_from: led_circle_tube
 
   solid_circle:
     inherit_from: led_circle

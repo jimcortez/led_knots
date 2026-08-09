@@ -14,6 +14,7 @@ from cadquery.func import spline, sweep
 
 from led_knots.core.led_circle import (
     create_led_circle_face,
+    create_led_circle_quad_tube_face,
     create_led_circle_tube_face,
     create_solid_circle_face,
     create_square_face,
@@ -52,6 +53,15 @@ def test_face_profiles_centered_on_origin() -> None:
             inner_tube_wall_thickness=0.5,
         ),
         "led_circle_tube",
+    )
+    _assert_centered(
+        create_led_circle_quad_tube_face(
+            outer_radius=15.0,
+            wall_thickness=4.0,
+            inner_tube_diameter=8.0,
+            inner_tube_wall_thickness=0.5,
+        ),
+        "led_circle_quad_tube",
     )
     _assert_centered(
         create_solid_circle_face(outer_radius=15.0, wall_thickness=4.0),

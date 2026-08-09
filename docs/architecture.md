@@ -133,7 +133,7 @@ src/led_knots/
 │   └── tube_models/            # TubeModel implementations + registry
 │       ├── __init__.py         # _REGISTRY, get_tube_model, register_tube_model
 │       ├── _base.py            # TubeModel protocol
-│       ├── swept_face.py       # led_circle / led_circle_tube / solid_circle / square
+│       ├── swept_face.py       # led_circle / led_circle_tube / led_circle_quad_tube / solid_circle / square
 │       ├── pyramid_studded.py  # Pyramid-studded tube (compound)
 │       └── braided_rope.py     # Core + N braided strands (compound)
 ├── knots/                      # One module per knot, each with build(config)
@@ -207,10 +207,12 @@ The current keys are:
 | -------------------- | -------------------- | ------------------------------------------------------- |
 | `led_circle`         | `SweptFaceModel`     | LED channel + outer wall + oval cavity (default)        |
 | `led_circle_tube`    | `SweptFaceModel`     | Same plus an inner tube cavity                          |
+| `led_circle_quad_tube` | `SweptFaceModel`   | `led_circle_tube` with four equally-spaced connectors   |
 | `solid_circle`       | `SweptFaceModel`     | Plain filled circle                                     |
 | `square`             | `SweptFaceModel`     | Plain filled square                                     |
 | `pyramid_studded`    | `PyramidStuddedModel`| Swept core with periodic pyramid studs (a `Compound`)   |
 | `braided_rope`       | `BraidedRopeModel`   | Core plus N helical strands (a `Compound`)              |
+| `braided_rope_tube`  | `BraidedRopeModel`   | Same model instance; braid over an LED-tube base        |
 
 `build_tube_from_path` resolves the active model with `get_tube_model(...)` and
 delegates. Higher-level models register themselves after `_REGISTRY` exists so

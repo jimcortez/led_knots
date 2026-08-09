@@ -17,6 +17,7 @@ from .swept_face import SweptFaceModel
 _REGISTRY: Dict[str, TubeModel] = {
     "led_circle": SweptFaceModel("led_circle"),
     "led_circle_tube": SweptFaceModel("led_circle_tube"),
+    "led_circle_quad_tube": SweptFaceModel("led_circle_quad_tube"),
     "solid_circle": SweptFaceModel("solid_circle"),
     "square": SweptFaceModel("square"),
 }
