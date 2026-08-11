@@ -63,18 +63,29 @@ render-knot knot_configs/test_short_rod_led_tube.yaml --server
 
 | `knot_type` | Description |
 |---------|-------------|
-| `rod` | Straight vertical pipe |
-| `ring` | Simple circular ring |
-| `helix` | Helical spiral path |
-| `sine_wave` | Sine wave oscillation path |
-| `trefoil` | Mathematical trefoil knot |
-| `figure_8` | Figure-8 / torus knot |
-| `jog_bend` | 2D jog bend path |
-| `jog_bend_3d` | 3D jog bend with orientation control |
-| `quarter_turn` | 90-degree turn path |
-| `twisted_rod` | Straight rod with 90-degree twist |
+The 15 knots this project builds, one config each — see [knotbook.ipynb](knotbook.ipynb) for the previews and [docs/code-map.md](docs/code-map.md) for the full table:
 
-Additional knot modules (`k4_1`, `k8_21`, `stevedore`) are discovered automatically — set `knot_type` to the module filename stem.
+| `knot_type` | Config | Description |
+|---------|-------------|-------------|
+| `ring` | `k1_1-ring.yaml` | Plain circular ring (the unknot) |
+| `k2_1` | `k2_1.yaml` | (2,1) torus knot |
+| `trefoil` | `k3_1-trefoil.yaml` | Trefoil (3_1) |
+| `k4_1` | `k4_1-figure-eight.yaml` | Figure-eight knot |
+| `k5_2` | `k5_2-three-twist.yaml` | Three-twist knot |
+| `k6_3` | `k6_3.yaml` | 6_3 |
+| `k7_1` | `k7_1-septoil.yaml` | Septoil (7_1) |
+| `k8_21` | `k8_21.yaml` | 8_21 |
+| `k9_2` | `k9_2.yaml` | 9_2 |
+| `k10_7` | `k10_7.yaml` | 10_7 |
+| `k11a6` | `k11a6.yaml` | K11a6 |
+| `k12a6` | `k12a6.yaml` | K12a6 |
+| `k13a6` | `k13a6.yaml` | K13a6 |
+| `k14n2` | `k14n2.yaml` | K14n2 (non-alternating) |
+| `k15n3` | `k15n3.yaml` | K15n3 (non-alternating) |
+
+Also available: `rod`, `helix`, `sine_wave`, `jog_bend`, `jog_bend_3d`, `quarter_turn`, `twisted_rod`, `twist_ring`, plus two knots outside the 15 — `stevedore` (6_1) and `k9_35`.
+
+Knot modules are discovered automatically — set `knot_type` to the module filename stem under `src/led_knots/knots/`.
 
 ### Command line options
 

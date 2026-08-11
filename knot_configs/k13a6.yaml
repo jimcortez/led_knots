@@ -1,0 +1,19 @@
+knot_type: k13a6
+
+# 8x the default 200 x 110 x 200 build volume. VERIFIED: sweeps, strands 54.7 mm
+# apart, bbox 1423 x 1600 x 573 mm.
+#
+# Read that bbox again -- this is a 1.6 METRE part. It is not printable in one
+# piece on any consumer machine, and it is not a tuning mistake: a 13-crossing
+# knot rendered in 30 mm LED tube genuinely needs that much room before the
+# strands stop intersecting. 6x still fails the sweep outright
+# (Standard_Failure: Bnd_Box is void).
+#
+# To get something printable, pick one:
+#   - enable max_print_bounds segmentation and print it in pieces, or
+#   - shrink face_settings.led_circle_tube.outer_diameter (30 mm today) and
+#     re-verify, which scales the whole requirement down proportionally.
+output_bounds:
+  width: 1600   # mm
+  length: 880   # mm
+  height: 1600  # mm

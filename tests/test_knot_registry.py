@@ -8,18 +8,33 @@ from led_knots.knots import registry
 
 
 EXPECTED_KNOT_TYPES = {
-    "figure_8",
+    # The 15 knotbook slots (see tests/test_knot_catalogue.py for the mapping).
+    "ring",
+    "k2_1",
+    "trefoil",
+    "k4_1",
+    "k5_2",
+    "k6_3",
+    "k7_1",
+    "k8_21",
+    "k9_2",
+    "k10_7",
+    "k11a6",
+    "k12a6",
+    "k13a6",
+    "k14n2",
+    "k15n3",
+    # Extra knots, outside the 15.
+    "k9_35",
+    "stevedore",
+    "twist_ring",
+    # Non-knot test and utility shapes.
     "helix",
     "jog_bend",
     "jog_bend_3d",
-    "k4_1",
-    "k8_21",
     "quarter_turn",
-    "ring",
     "rod",
     "sine_wave",
-    "stevedore",
-    "trefoil",
     "twisted_rod",
 }
 

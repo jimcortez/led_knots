@@ -44,21 +44,49 @@ One module per centerline shape. Each exposes `build(config)` and is discovered
 by filename via [`registry.py`](../src/led_knots/knots/registry.py). Set
 `knot_type` in a config YAML and run `render-knot <config.yaml>`.
 
+### The 15-knot set
+
+[`knotbook.ipynb`](../knotbook.ipynb) is the spec for which knots this project
+builds: 15 cells, one per slot, each naming its module and config. The mapping
+is pinned by [`tests/test_knot_catalogue.py`](../tests/test_knot_catalogue.py).
+
+| Slot | Module | `knot_type` | Config | Path source |
+| --- | --- | --- | --- | --- |
+| 1 | [`ring.py`](../src/led_knots/knots/ring.py) | `ring` | `k1_1-ring.yaml` | Parametric circle (the unknot). |
+| 2 | [`k2_1.py`](../src/led_knots/knots/k2_1.py) | `k2_1` | `k2_1.yaml` | `torus_knot(p=2, q=1)`; topologically the unknot. |
+| 3 | [`trefoil.py`](../src/led_knots/knots/trefoil.py) | `trefoil` | `k3_1-trefoil.yaml` | `pyknotid.make.trefoil` (3_1). |
+| 4 | [`k4_1.py`](../src/led_knots/knots/k4_1.py) | `k4_1` | `k4_1-figure-eight.yaml` | `mk.k4_1`; the figure-eight knot. |
+| 5 | [`k5_2.py`](../src/led_knots/knots/k5_2.py) | `k5_2` | `k5_2-three-twist.yaml` | `mk.k5_2`; the three-twist knot. |
+| 6 | [`k6_3.py`](../src/led_knots/knots/k6_3.py) | `k6_3` | `k6_3.yaml` | DT code `6_3`. |
+| 7 | [`k7_1.py`](../src/led_knots/knots/k7_1.py) | `k7_1` | `k7_1-septoil.yaml` | DT code `7_1`; the septoil. |
+| 8 | [`k8_21.py`](../src/led_knots/knots/k8_21.py) | `k8_21` | `k8_21.yaml` | `mk.k8_21`. |
+| 9 | [`k9_2.py`](../src/led_knots/knots/k9_2.py) | `k9_2` | `k9_2.yaml` | DT code `9_2`. |
+| 10 | [`k10_7.py`](../src/led_knots/knots/k10_7.py) | `k10_7` | `k10_7.yaml` | DT code `10_7`. |
+| 11 | [`k11a6.py`](../src/led_knots/knots/k11a6.py) | `k11a6` | `k11a6.yaml` | DT code `K11a6`. |
+| 12 | [`k12a6.py`](../src/led_knots/knots/k12a6.py) | `k12a6` | `k12a6.yaml` | DT code `K12a6`; 600 points. |
+| 13 | [`k13a6.py`](../src/led_knots/knots/k13a6.py) | `k13a6` | `k13a6.yaml` | DT code `K13a6`; 600 points. |
+| 14 | [`k14n2.py`](../src/led_knots/knots/k14n2.py) | `k14n2` | `k14n2.yaml` | DT code `K14n2`; 600 points, non-alternating. |
+| 15 | [`k15n3.py`](../src/led_knots/knots/k15n3.py) | `k15n3` | `k15n3.yaml` | DT code `K15n3`; 600 points, non-alternating. |
+
+Module names use lowercase `k` notation even where the catalogue lookup is
+uppercase (`K11a6` → `k11a6`); slots that already had a common name keep it
+(`ring`, `trefoil`). Slots 12-15 raise their point count because relaxation
+silently changes the knot type at 200 points — see `k12a6.py`.
+
+### Other shapes
+
 | Module | `knot_type` | Shape |
 | --- | --- | --- |
 | [`rod.py`](../src/led_knots/knots/rod.py) | `rod` | Straight vertical pipe along Z. |
-| [`ring.py`](../src/led_knots/knots/ring.py) | `ring` | Simple circular ring. |
 | [`helix.py`](../src/led_knots/knots/helix.py) | `helix` | Helical spiral. |
 | [`sine_wave.py`](../src/led_knots/knots/sine_wave.py) | `sine_wave` | Multi-period sine wave path. |
-| [`trefoil.py`](../src/led_knots/knots/trefoil.py) | `trefoil` | Trefoil knot with ribbon aux spine. |
-| [`figure_8.py`](../src/led_knots/knots/figure_8.py) | `figure_8` | Figure-8 / torus knot. |
 | [`jog_bend.py`](../src/led_knots/knots/jog_bend.py) | `jog_bend` | 2D jog bend. |
 | [`jog_bend_3d.py`](../src/led_knots/knots/jog_bend_3d.py) | `jog_bend_3d` | 3D jog bend with ribbon-aware twist. |
 | [`quarter_turn.py`](../src/led_knots/knots/quarter_turn.py) | `quarter_turn` | 90° turn. |
 | [`twisted_rod.py`](../src/led_knots/knots/twisted_rod.py) | `twisted_rod` | Straight rod with 90° twist. |
-| [`stevedore.py`](../src/led_knots/knots/stevedore.py) | `stevedore` | Stevedore knot (k6_1). |
-| [`k4_1.py`](../src/led_knots/knots/k4_1.py) | `k4_1` | k4_1 knot. |
-| [`k8_21.py`](../src/led_knots/knots/k8_21.py) | `k8_21` | k8_21 knot. |
+| [`twist_ring.py`](../src/led_knots/knots/twist_ring.py) | `twist_ring` | `torus_knot(p=5, q=10)` ring. |
+| [`stevedore.py`](../src/led_knots/knots/stevedore.py) | `stevedore` | Stevedore knot (6_1). Outside the 15. |
+| [`k9_35.py`](../src/led_knots/knots/k9_35.py) | `k9_35` | 9_35 knot. Outside the 15; slot 9 is `k9_2`. |
 
 See [CLI reference](cli-reference.md) for flags and config layout.
 

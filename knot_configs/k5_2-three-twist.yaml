@@ -1,1 +1,49 @@
 knot_type: k5_2
+
+# =============================================================================
+# BROKEN: does not sweep. Pre-existing, not caused by the 15-knot work.
+# =============================================================================
+#
+# Errors seen, all at the default 200 x 110 x 200 build volume:
+#
+#   150 points (the count this module used before)
+#       Standard_Failure: BRepOffsetAPI_MakePipeShell::MakeSolid   (~1.4 s)
+#   200 points (current, matches knotbook.ipynb)
+#       Standard_Failure: BRepFill_Sweep::BuildEdge                (~2.4 s)
+#   300 points
+#       Standard_Failure: BRepFill_Sweep::BuildEdge                (~5.6 s)
+#
+# Point count is not the variable -- it fails at every count tried, including
+# the one that shipped before. Changing NUM_POINTS in
+# src/led_knots/knots/k5_2.py will not fix this.
+#
+# DIAGNOSIS. Measured on the scaled centerline at these bounds:
+#
+#   minimum radius of curvature   1.98 mm
+#   tube outer radius            15.00 mm     <-- centerline bends 7.6x tighter
+#   closest strand approach       9.13 mm
+#   tube outer diameter          30.00 mm     <-- strands overlap by ~21 mm
+#
+# A pipe sweep cannot round a corner tighter than its own radius: the outer
+# wall folds through itself and OCC gives up. At 1.98 mm against a 15 mm tube
+# this path has, in effect, a cusp. That is the more likely of the two
+# problems, and MakeSolid/BuildEdge are the errors it produces.
+#
+# WHAT TO TRY, cheapest first:
+#
+#   1. Raise output_bounds here. Curvature radius scales linearly, so 7.6x is
+#      the bare minimum to clear the tube radius, and the one comparable knot
+#      that was solved this way (k13a6) needed about 3x its own minimum before
+#      it actually swept. Budget for ~20x, i.e. a multi-metre part. Verify,
+#      do not assume -- and check the bounding box, because at too-tight
+#      bounds this pipeline can return a sub-millimetre solid without raising.
+#   2. Shrink face_settings.led_circle_tube.outer_diameter (30 mm today).
+#      This relaxes both the curvature limit and the strand-overlap limit
+#      proportionally, and unlike (1) it does not make the part enormous.
+#      Probably the real answer.
+#   3. Smooth the path. mk.k5_2 emits the tight corner directly; passing the
+#      points through more smoothing before splining would raise the minimum
+#      curvature radius without changing the knot.
+#
+# To reproduce: uv run render-knot knot_configs/k5_2-three-twist.yaml
+# =============================================================================

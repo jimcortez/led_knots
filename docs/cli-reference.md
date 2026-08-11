@@ -45,15 +45,17 @@ All `*.py` modules under [src/led_knots/knots/](../src/led_knots/knots/) except
 | `ring` | [ring.py](../src/led_knots/knots/ring.py) | Closed circular ring |
 | `helix` | [helix.py](../src/led_knots/knots/helix.py) | Cylindrical helix |
 | `sine_wave` | [sine_wave.py](../src/led_knots/knots/sine_wave.py) | Sine-wave path |
-| `trefoil` | [trefoil.py](../src/led_knots/knots/trefoil.py) | Trefoil (3_1) knot |
-| `figure_8` | [figure_8.py](../src/led_knots/knots/figure_8.py) | Figure-eight knot |
 | `jog_bend` | [jog_bend.py](../src/led_knots/knots/jog_bend.py) | Planar jog-bend path |
 | `jog_bend_3d` | [jog_bend_3d.py](../src/led_knots/knots/jog_bend_3d.py) | 3D jog-bend path |
 | `quarter_turn` | [quarter_turn.py](../src/led_knots/knots/quarter_turn.py) | Single quarter-turn elbow |
 | `twisted_rod` | [twisted_rod.py](../src/led_knots/knots/twisted_rod.py) | Vertical rod with axial twist |
-| `k4_1` | [k4_1.py](../src/led_knots/knots/k4_1.py) | K4_1 knot |
-| `k8_21` | [k8_21.py](../src/led_knots/knots/k8_21.py) | K8_21 knot |
-| `stevedore` | [stevedore.py](../src/led_knots/knots/stevedore.py) | Stevedore (k6_1) knot |
+| `twist_ring` | [twist_ring.py](../src/led_knots/knots/twist_ring.py) | (5,10) torus-knot ring |
+
+The 15 knots proper — `ring`, `k2_1`, `trefoil`, `k4_1`, `k5_2`, `k6_3`, `k7_1`,
+`k8_21`, `k9_2`, `k10_7`, `k11a6`, `k12a6`, `k13a6`, `k14n2`, `k15n3` — each
+have a config under `knot_configs/`; see the
+[code map](code-map.md#the-15-knot-set). Two more sit outside that set:
+`stevedore` (6_1) and `k9_35`.
 
 ## Part types
 

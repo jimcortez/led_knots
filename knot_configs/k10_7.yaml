@@ -1,0 +1,11 @@
+knot_type: k10_7
+
+# 1.5x the default 200 x 110 x 200 build volume. See k9_2.yaml for why the
+# dense knots need this: the 30 mm tube cannot fit through gaps the default
+# bounds leave between strands. 10_7 sits ~16.8 mm apart at 1x and fails the
+# sweep; 1.5x is the smallest tested multiplier that works, bbox 220 x 212 x
+# 146 mm.
+output_bounds:
+  width: 300    # mm
+  length: 165   # mm
+  height: 300   # mm

@@ -1,1 +1,42 @@
 knot_type: k8_21
+
+# =============================================================================
+# BROKEN: does not sweep. Pre-existing, not caused by the 15-knot work.
+# =============================================================================
+#
+# Errors seen, all at the default 200 x 110 x 200 build volume:
+#
+#   200 points (current, matches knotbook.ipynb)
+#       Standard_Failure: BRepFill_Sweep::BuildEdge   (~2.3 s)
+#   300 points (the count this module used before)
+#       Standard_Failure: BRepFill_Sweep::BuildEdge   (~5.9 s)
+#
+# It failed identically at the 300 points that shipped before, so point count
+# is not the variable and editing NUM_POINTS in src/led_knots/knots/k8_21.py
+# will not fix it.
+#
+# DIAGNOSIS. Measured on the scaled centerline at these bounds:
+#
+#   minimum radius of curvature   3.10 mm
+#   tube outer radius            15.00 mm     <-- centerline bends 4.8x tighter
+#   closest strand approach       5.64 mm
+#   tube outer diameter          30.00 mm     <-- strands overlap by ~24 mm
+#
+# Both limits are violated. The curvature one is what produces BuildEdge: a
+# pipe sweep cannot round a corner tighter than its own radius without the
+# outer wall folding through itself.
+#
+# WHAT TO TRY, cheapest first:
+#
+#   1. Shrink face_settings.led_circle_tube.outer_diameter (30 mm today).
+#      Relaxes the curvature limit and the strand-overlap limit together, and
+#      keeps the part a sane size. Most likely the real fix.
+#   2. Raise output_bounds here. 4.8x is the bare minimum to clear the tube
+#      radius; the one comparable knot solved this way (k13a6) needed roughly
+#      3x its own minimum before it swept, so budget for ~15x and expect a
+#      part over a metre across. Verify rather than assume, and check the
+#      bounding box -- at too-tight bounds this pipeline can return a
+#      sub-millimetre solid without raising an error.
+#
+# To reproduce: uv run render-knot knot_configs/k8_21.yaml
+# =============================================================================

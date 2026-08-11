@@ -1,0 +1,17 @@
+knot_type: k11a6
+
+# 3x the default 200 x 110 x 200 build volume.
+#
+# The led_circle_tube profile is 30 mm across, so two non-adjacent stretches of
+# the centerline have to stay 30 mm apart or the swept tube passes through
+# itself. K11a6 sits ~19.8 mm apart at 1x. 1.5x and 2x both still fail the
+# sweep (BRepFill_Sweep::BuildEdge, then Bnd_Box is void); 3x is the smallest
+# tested multiplier that works, verified bbox 596 x 594 x 326 mm.
+#
+# That is a ~60 cm part -- far past the Elegoo Saturn 4 Ultra plate. Enable
+# max_print_bounds segmentation to print it, or shrink
+# face_settings.led_circle_tube.outer_diameter and re-verify.
+output_bounds:
+  width: 600    # mm
+  length: 330   # mm
+  height: 600   # mm

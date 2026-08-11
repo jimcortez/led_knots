@@ -273,9 +273,9 @@ viewer.
 batch driver used to keep `assets/*.png` (referenced from the
 [README](../README.md)) in sync. It:
 
-1. Walks a hardcoded `KNOTS` list (`rod`, `twisted_rod`, `quarter_turn`,
-   `ring`, `jog_bend`, `jog_bend_3d`, `helix`, `figure_8`, `trefoil`,
-   `k4_1`, `stevedore`).
+1. Walks `list_knot_types()`, so every module under
+   [src/led_knots/knots/](../src/led_knots/knots/) is covered automatically,
+   including all 15 knotbook slots.
 2. For each name, invokes
    `render-knot knot_configs/<name>.yaml` (preview PNG in the render bundle) as a
    subprocess from the project root (`subprocess.run(..., timeout=300)`).

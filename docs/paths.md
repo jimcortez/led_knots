@@ -8,7 +8,7 @@ A "path" is a 3D centerline that a tube cross-section is swept along. Concretely
 
 Two structural distinctions matter:
 
-- **Open vs closed.** The current sweep pipeline does not tolerate paths whose start and end coincide — when the path is closed the two end faces overlap and the sweep fails. Every knot module that comes from a periodic generator (the pyknotid-based ones — trefoil, k4_1, k8_21, stevedore, figure_8, ring) drops the final point with `spline(knot_points[:-1])` (or `[:-10]` in the ring case, which trims more aggressively to leave a visible gap). See the comment "Open path (closed path causes face overlap)" repeated across these modules, e.g. [trefoil.py:41](../src/led_knots/knots/trefoil.py#L41).
+- **Open vs closed.** The current sweep pipeline does not tolerate paths whose start and end coincide — when the path is closed the two end faces overlap and the sweep fails. Every knot module that comes from a periodic generator (all the pyknotid-based ones) drops the final point, which is [`draw_knot_points`](../src/led_knots/core/knot_build.py)'s `drop_last=1` default. The ring passes `drop_last=10` to trim more aggressively and leave a visible gap.
 - **Smoothness.** The path's curvature governs how much twist the ribbon-shaped LED cross-section must accumulate. Sampling density (the `num_points` argument to the generator and the `num_samples` argument to `build_ribbon_aux_spine`) is the main lever for making the path smoother; 150 samples is the conventional balance between smoothness and build time.
 
 The path is the only piece you have to invent when you add a new knot. Cross-section, twist solving, slicing, and export are all delegated.
@@ -82,17 +82,56 @@ If the path has no curvature at all (a straight rod), the twist solver computes 
 | ring | [ring.py](../src/led_knots/knots/ring.py) | Parametric circle (sin/cos) | Open (drops 10 trailing points) | Planar circle of radius 3 in pyknotid units, rescaled to bounds, with a visible gap. |
 | helix | [helix.py](../src/led_knots/knots/helix.py) | `Wire.makeHelix` (CadQuery primitive) | Open | Helix with pitch `height/2`, radius `width/2`, plus an offset helix as aux spine. `rotation_z` derived from the pitch angle. |
 | sine_wave | [sine_wave.py](../src/led_knots/knots/sine_wave.py) | Analytic `y = A * sin(2*pi*n*t)` along z | Open | Two periods, amplitude `width/2`, vertical start/end tangents. |
-| trefoil | [trefoil.py](../src/led_knots/knots/trefoil.py) | `pyknotid.make.trefoil(num_points=150)` | Open (drops last point) | Classic 3_1 trefoil; uses `build_ribbon_aux_spine` with 150 samples. |
-| figure_8 | [figure_8.py](../src/led_knots/knots/figure_8.py) | `torus_knot(p=5, q=10, num=150)` | Open (drops last point) | Despite the filename this is a 5,10 torus knot, not the topological 4_1 figure-8; `rotation_z=90` fixed, no aux spine. |
+| trefoil | [trefoil.py](../src/led_knots/knots/trefoil.py) | `pyknotid.make.trefoil(num_points=200)` | Open (drops last point) | Classic 3_1 trefoil. Slot 3. |
 | jog_bend | [jog_bend.py](../src/led_knots/knots/jog_bend.py) | 3-point spline in the y-z plane | Open | Smooth S-curve from origin to `(0, width, height)` with vertical start/end tangents. |
 | jog_bend_3d | [jog_bend_3d.py](../src/led_knots/knots/jog_bend_3d.py) | 3-point spline with mixed tangents | Open | Diagonal version of `jog_bend` with a tangent flip at the midpoint; uses `build_ribbon_aux_spine` with 40 samples. |
 | quarter_turn | [quarter_turn.py](../src/led_knots/knots/quarter_turn.py) | Two-point spline with vertical-to-horizontal tangents | Open | 90 degree bend from `(0,0,0)` to `(0, height, height)`. |
 | twisted_rod | [twisted_rod.py](../src/led_knots/knots/twisted_rod.py) | Straight z-axis path + helical aux | Open | Straight vertical rod with a hand-built helical aux spine (`create_helix_points`) that imposes a 90 degree end-to-end twist. |
-| k4_1 | [k4_1.py](../src/led_knots/knots/k4_1.py) | `pyknotid.make.k4_1(num_points=150)` | Open (drops last point) | Figure-eight knot (topologically 4_1); same template as trefoil. |
-| k8_21 | [k8_21.py](../src/led_knots/knots/k8_21.py) | `pyknotid.make.k8_21(num_points=300)` | Open (drops last point) | 8-crossing knot 8_21; generates 300 raw points, samples 150 for the aux spine. |
-| stevedore | [stevedore.py](../src/led_knots/knots/stevedore.py) | `pyknotid.make.k6_1(num_points=300)` | Open (drops last point) | The 6_1 (stevedore) knot. |
+| twist_ring | [twist_ring.py](../src/led_knots/knots/twist_ring.py) | `torus_knot(p=5, q=10, num=150)` | Open (drops 5 trailing points) | A wound ring, not one of the 15 knotbook slots. |
+| k2_1 | [k2_1.py](../src/led_knots/knots/k2_1.py) | `torus_knot(p=2, q=1, num=200)` | Open (drops last point) | Slot 2. Topologically the unknot; there is no 2-crossing knot. |
+| k4_1 | [k4_1.py](../src/led_knots/knots/k4_1.py) | `pyknotid.make.k4_1(num_points=200)` | Open (drops last point) | Figure-eight knot. Slot 4. |
+| k5_2 | [k5_2.py](../src/led_knots/knots/k5_2.py) | `pyknotid.make.k5_2(num_points=200)` | Open (drops last point) | Three-twist knot. Slot 5. |
+| k8_21 | [k8_21.py](../src/led_knots/knots/k8_21.py) | `pyknotid.make.k8_21(num_points=200)` | Open (drops last point) | 8-crossing knot 8_21. Slot 8. |
+| k6_3, k7_1, k9_2, k10_7, k11a6 | e.g. [k7_1.py](../src/led_knots/knots/k7_1.py) | `knot_from_name(<name>, num_points=200, relax_steps=400)` | Open (drops last point) | Slots 6, 7, 9, 10, 11. Catalogue DT code, relaxed into an atlas-like layout. |
+| k12a6, k13a6, k14n2, k15n3 | e.g. [k15n3.py](../src/led_knots/knots/k15n3.py) | `knot_from_name(<name>, num_points=600, relax_steps=400)` | Open (drops last point) | Slots 12-15. **600 points, not 200** — see the warning below. |
+| stevedore | [stevedore.py](../src/led_knots/knots/stevedore.py) | `pyknotid.make.k6_1(num_points=300)` | Open (drops last point) | The 6_1 (stevedore) knot. Outside the 15; slot 6 is `k6_3`. |
+| k9_35 | [k9_35.py](../src/led_knots/knots/k9_35.py) | `Knot.from_dowker_code([8, 12, 16, ...])` | Open (drops last point) | Outside the 15; slot 9 is `k9_2`. |
 
-All of the pyknotid-derived modules share the same scaffold: load points, scale with `scale_pyknot_points`, build an open spline, build the aux spine, call `draw_part`. The trefoil module is the cleanest reference template.
+All of the pyknotid-derived modules share the same scaffold — scale, open the spline, build the aux spine, `draw_part` — which now lives in one place as [`draw_knot_points`](../src/led_knots/core/knot_build.py). A knot module is just its path source plus one call to it. [trefoil.py](../src/led_knots/knots/trefoil.py) is the cleanest reference template.
+
+### Relaxation can silently change the knot
+
+`relax_knot_points` (used by every DT-code module via `dowker_to_knot(relax_steps=...)`) is a cosmetic curve-shortening flow. Its self-repulsion is short-range, so when the polyline is coarser than the gaps between strands, a strand passes through another and the result is a **different, simpler knot — with nothing raised**. At 200 points, K15n3 comes out as 6_2.
+
+400 points is the lowest count measured to survive 12 through 15 crossings; the modules use 600 for margin, since at 600 several of them identify uniquely rather than as one of a candidate set. 250 does not survive — a curve relaxed at 600 and resampled down to 250 comes back as a different knot.
+
+If you add a slot above 11 crossings, or lower a `NUM_POINTS` constant, confirm the curve with `Knot.identify()` first — [`tests/test_knot_catalogue.py`](../tests/test_knot_catalogue.py) does exactly that for every DT-code slot (`pytest -m slow`).
+
+### Dense knots need a bigger build volume, and some need an unprintable one
+
+A correct centerline is not enough to sweep. At the default `output_bounds` of 200 x 110 x 200 mm, half the 15 slots either fail with `Standard_Failure: BRepFill_Sweep::BuildEdge` / `Bnd_Box is void`, or — worse — return a solid that is not the part. `k6_3` at default bounds collapsed to a 0.5 mm blob with no error raised. **A clean exit from the sweep is not evidence of a real part; check the bounding box.**
+
+Raising `output_bounds` in the knot's own config is the lever (scaling is linear). Measured results, all verified through `build_tube_from_path`:
+
+| Slot | Bounds | Result |
+| --- | --- | --- |
+| k6_3, k9_2, k10_7 | 300 x 165 x 300 (1.5x) | Sweeps. Below 1.5x, k6_3 degenerates and the other two fail. |
+| k11a6 | 600 x 330 x 600 (3x) | Sweeps. 1.5x and 2x both still fail. |
+| k13a6 | 1600 x 880 x 1600 (8x) | Sweeps, strands 54.7 mm apart — but the part is **1.4 x 1.6 x 0.6 m**. 6x fails. |
+| k15n3 | only at **48x** | Sweeps at 9600 x 5280 x 9600, producing a **9.5 m** part. Smallest working volume unknown. |
+| k12a6 | **none found** | Untested above 1x, where it returns a self-intersecting solid without erroring. |
+| k14n2 | **none found** | Fails at 1x, 48x *and* 64x. Not a scale problem. |
+| k5_2, k8_21 | **none found** | Fail at default bounds and at their original point counts. Pre-existing. |
+
+Three cautions about diagnosing this:
+
+- **Neither strand clearance nor minimum curvature radius predicts failure.** `k7_1` sweeps with strands 10.5 mm apart; `k11a6` failed at 19.8 mm. Every slot that sweeps today sits *below* the 30 mm the tube diameter nominally demands, so treat clearance as a smell test for fused-looking strands, not as a pass/fail gate.
+- **Scale is not always the lever, and neither is point count.** `k14n2` fails at 64x, where its strands are hundreds of millimetres apart — self-intersection cannot be the cause there. Decoupling the two point counts (relax at 600 to keep the topology, resample down for the spline) does not rescue it either: at 250 points the curve loses the knot type outright, and at 400 the topology survives but the sweep still fails. Counter-intuitively `k15n3` sweeps at 48x with 600 points and fails at the same volume with 400, so fewer control points is not reliably easier for OCC.
+- **Sub-30 mm clearance still means strands merge.** `k9_2` at 1.5x leaves 26.3 mm against a 30 mm tube, so those strands fuse where they cross. That is a design call, not an error — but it blocks the LED channel at the fusion point.
+
+For the 12-15 crossing slots the honest position is that a knot that dense, rendered in 30 mm tube, is a very large object — and for two of them no working setting is known at any size. The most promising unexplored lever is a smaller `face_settings.led_circle_tube.outer_diameter` in those configs, which relaxes the requirement proportionally; `max_print_bounds` segmentation is the alternative where a large part does sweep.
+
+When measuring any of this, note that these configs are re-read per attempt — do not edit a knot's config while a bounds sweep against it is running, or the multipliers compound silently.
 
 ## Path utilities reference
 
@@ -104,7 +143,7 @@ Defined in [src/led_knots/core/pyknot_utils.py](../src/led_knots/core/pyknot_uti
 
 Rescales an `(N, 3)` numpy array of points so that, after subtracting `padding` from each side, the cloud fits in a `width x height x length` box and is translated into the positive octant. With `preserve_aspect_ratio=True` it uses a uniform scale factor (one shared `min` of the three per-axis scales); with `preserve_aspect_ratio=False` each axis is scaled independently to fill the padded extent.
 
-Used by every pyknotid-based knot (trefoil, k4_1, k8_21, stevedore, figure_8, ring). All of them pass `width=output_bounds.width`, `height=output_bounds.width` (note: same value — the knot becomes square in the x-y plane), `length=output_bounds.height`, `padding=tube_settings.outer_radius`, and `preserve_aspect_ratio=False`.
+Called for every pyknotid-based knot, from inside [`draw_knot_points`](../src/led_knots/core/knot_build.py), with `padding=tube_settings.outer_radius` and the three `output_bounds` axes. The ring is the exception: it overrides the bounds to `(width, width, height)` and passes `preserve_aspect_ratio=False` so the planar circle fills the plate.
 
 Returns a plain Python list of `(x, y, z)` tuples ready to feed into `spline(...)`.
 
@@ -154,7 +193,7 @@ Defined in [path_utils.py:476](../src/led_knots/core/path_utils.py#L476).
 
 The high-level wrapper that every curved knot uses. Pulls `min_90_degree_twist_distance` from `config.path_settings`, samples the path, computes the desired twist schedule, runs the global feasibility check (see [min_90_degree_twist_distance](#min_90_degree_twist_distance) above), then builds the aux spine. Returns `(aux_spine, initial_rotation)` so the caller can plumb both into `draw_part`.
 
-Used by trefoil, k4_1, k8_21, stevedore, jog_bend_3d. The rod, ring, sine_wave, jog_bend, quarter_turn, helix, twisted_rod, and figure_8 modules skip it.
+Called from `draw_knot_points` for every knot module, and directly by jog_bend_3d. The rod, ring, sine_wave, jog_bend, quarter_turn, helix, and twisted_rod modules skip it — `draw_knot_points(..., aux=False)` in the ring's case.
 
 Gotcha: the feasibility check is `O(n^2)` over the samples — `num_samples=150` runs roughly 11,000 comparisons. That is fine; do not bump `num_samples` into the thousands.
 
@@ -174,37 +213,34 @@ Defined in [path_utils.py:36](../src/led_knots/core/path_utils.py#L36).
 
 Removes a contiguous chord-length segment from a polyline (used for cutting a physical gap into a closed-looking knot before splining). Returns the trimmed points and a `PathGapInfo` describing where the gap landed (start/end indices, mid point, tangent). `center_fraction` in `[-0.5, 0.5]` biases the gap toward the start (negative) or end (positive) of the polyline.
 
-Not currently called from any of the built-in knot modules — it exists for tooling that wants to introduce a print joint at a controlled location. The ring module's `[:-10]` slice is the manual equivalent.
+Not currently called from any of the built-in knot modules — it exists for tooling that wants to introduce a print joint at a controlled location. `draw_knot_points(..., drop_last=10)` is the manual equivalent.
+
+### `draw_knot_points(points, config, *, drop_last=1, bounds=None, preserve_aspect_ratio=True, aux=True, num_samples=150, spine_offset_radius=5.0)`
+
+Defined in [src/led_knots/core/knot_build.py](../src/led_knots/core/knot_build.py).
+
+The whole back half of a knot module in one call: scale the raw pyknotid points into the build volume, drop the trailing points that open the loop, solve the twist schedule with `build_ribbon_aux_spine`, and hand path plus aux spine to `draw_part`. Every pyknotid-derived knot module goes through it, so a module is just its path source.
+
+`bounds` overrides `config.output_bounds` when a planar knot wants a different axis mapping (the ring is the only current case). `aux=False` skips the twist solver for paths with no meaningful curvature. `ValueError` from the feasibility check propagates — see [min_90_degree_twist_distance](#min_90_degree_twist_distance).
 
 ## Cookbook: add a new knot
 
-1. **Create the module.** Copy [src/led_knots/knots/trefoil.py](../src/led_knots/knots/trefoil.py) to `src/led_knots/knots/<your_knot>.py`. The trefoil template is the most canonical: expose `build(config)`, generate points, rescale, open the path, build the aux spine, call `draw_part`.
-2. **Generate the path.** Pick one of three sources:
-   - **pyknotid** — `from pyknotid.make import some_knot; k = some_knot(num_points=150); pts = scale_pyknot_points(k.points, width=config.output_bounds.width, height=config.output_bounds.width, length=config.output_bounds.height, padding=config.tube_settings.outer_radius, preserve_aspect_ratio=False)`. Drop the last point: `path = spline(pts[:-1])`.
-   - **Analytic numpy** — build a list of `(x, y, z)` tuples in millimetres directly. Anchor coordinates to `config.output_bounds.{width, height}` rather than literals so the part respects the configured build volume. See [sine_wave.py](../src/led_knots/knots/sine_wave.py).
-   - **CadQuery primitive** — `Wire.makeHelix(...)` or a hand-written `cadquery.func.spline(...)` with explicit `tgts`.
-3. **Build the aux spine** (only if the path has meaningful curvature):
-
-   ```python
-   aux_spine, initial_rotation = build_ribbon_aux_spine(
-       path,
-       config,
-       num_samples=150,
-       spine_offset_radius=5.0,
-   )
-   ```
-
-   Wrap it in `try/except ValueError` if you want to fall back to a no-aux sweep with a clear message, or just let the error propagate so the user knows the bend is infeasible.
-4. **Render inside `build(config)`.**
+1. **Create the module.** Copy [src/led_knots/knots/trefoil.py](../src/led_knots/knots/trefoil.py) to `src/led_knots/knots/<your_knot>.py`. It is the canonical template and is down to two statements: get points, call `draw_knot_points`.
+2. **Generate the path.** Pick one of four sources:
+   - **A named knot from the catalogue** — `k = knot_from_name("10_7", num_points=200, relax_steps=400)`. Handles Rolfsen (`10_7`) and Knot Atlas (`K11a6`) names. Above 11 crossings raise `num_points` to 600 and verify with `Knot.identify()`; see [Relaxation can silently change the knot](#relaxation-can-silently-change-the-knot).
+   - **pyknotid generators** — `from pyknotid.make import some_knot; k = some_knot(num_points=200)`.
+   - **Analytic numpy** — build an `(N, 3)` array directly, as [ring.py](../src/led_knots/knots/ring.py) does. Anchor coordinates to `config.output_bounds.{width, height}` rather than literals so the part respects the configured build volume, or let `draw_knot_points` rescale for you. See also [sine_wave.py](../src/led_knots/knots/sine_wave.py).
+   - **CadQuery primitive** — `Wire.makeHelix(...)` or a hand-written `cadquery.func.spline(...)` with explicit `tgts`. These bypass `draw_knot_points` and call `draw_part` themselves.
+3. **Render inside `build(config)`.**
 
    ```python
    def build(config: Config) -> None:
-       # ... build path and optional aux_spine ...
-       draw_part(path, config, aux=aux_spine, rotation_z=initial_rotation)
+       k = knot_from_name("10_7", num_points=200, relax_steps=400)
+       draw_knot_points(k.points, config)
    ```
 
-   Omit `aux` and `rotation_z` for paths without a custom twist schedule.
-5. **Add a config file.** Create a YAML under `knot_configs/` (or any path) with `knot_type` set to your module stem:
+   Pass `aux=False` for paths with no meaningful curvature, `drop_last=N` to widen the gap, `bounds=(w, h, l)` to override the axis mapping.
+4. **Add a config file.** Create a YAML under `knot_configs/` (or any path) with `knot_type` set to your module stem:
 
    ```yaml
    knot_type: my_knot
@@ -212,8 +248,9 @@ Not currently called from any of the built-in knot modules — it exists for too
      name: my_knot
    ```
 
-   No `pyproject.toml` entry is needed — knot modules are discovered by filename.
-6. **Validate.** Run `render-knot knot_configs/my_knot.yaml`. The render bundle includes a preview PNG and STL by default. See the [render pipeline guide](rendering-and-preview.md) for all export formats.
+   No `pyproject.toml` entry is needed — knot modules are discovered by filename. A stem starting with `_` is treated as a private helper and is not offered as a `knot_type`.
+5. **Validate.** Run `render-knot knot_configs/my_knot.yaml`. The render bundle includes a preview PNG and STL by default. See the [render pipeline guide](rendering-and-preview.md) for all export formats.
+6. **Register it in the tests.** Add the stem to `EXPECTED_KNOT_TYPES` in [tests/test_knot_registry.py](../tests/test_knot_registry.py), which asserts set equality against the filesystem. If it is a DT-code knot, add it to `DT_CODE_SLOTS` in [tests/test_knot_catalogue.py](../tests/test_knot_catalogue.py) too, so its topology is checked.
 
 ## Cookbook: tune an existing knot
 

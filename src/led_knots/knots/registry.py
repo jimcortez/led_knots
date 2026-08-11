@@ -13,11 +13,16 @@ _PACKAGE = "led_knots.knots"
 
 
 def list_knot_types() -> list[str]:
-    """Return sorted knot type names matching *.py stems in this package (excluding __init__)."""
+    """Return sorted knot type names matching *.py stems in this package.
+
+    Stems starting with an underscore are treated as private helpers, not knot
+    types, so a shared module can live in this package without becoming a
+    selectable ``knot_type``.
+    """
     return sorted(
         path.stem
         for path in _KNOTS_DIR.glob("*.py")
-        if path.stem != "__init__" and path.stem != "registry"
+        if not path.stem.startswith("_") and path.stem != "registry"
     )
 
 

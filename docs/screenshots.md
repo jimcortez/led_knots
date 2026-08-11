@@ -86,10 +86,15 @@ render-knot knot_configs/jog_bend.yaml
 
 ## Figure 8
 
-Figure-8 / torus knot.
+The figure-eight knot (4_1), slot 4 of the 15.
 
-![Figure 8](../assets/figure_8.png)
+![Figure 8](../assets/k4_1.png)
 
 ```bash
-render-knot knot_configs/figure_8.yaml
+render-knot knot_configs/k4_1-figure-eight.yaml
 ```
+
+The gallery above predates the full 15-knot set and covers only the starter
+shapes. Rerun `scripts/generate_previews.py` to refresh `assets/` for every
+knot type, or see [knotbook.ipynb](../knotbook.ipynb) for path previews of all
+15 slots.

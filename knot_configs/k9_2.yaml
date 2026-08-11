@@ -1,0 +1,16 @@
+knot_type: k9_2
+
+# 1.5x the default 200 x 110 x 200 build volume.
+#
+# The led_circle_tube profile is 30 mm across, so two non-adjacent stretches of
+# the centerline have to stay 30 mm apart or the swept tube passes through
+# itself and OCC fails with BRepFill_Sweep::BuildEdge. At the default bounds
+# 9_2 packs strands ~16.6 mm apart. 1.5x is the smallest tested multiplier that
+# sweeps; verified bbox 299 x 300 x 134 mm.
+#
+# This no longer fits the Elegoo Saturn 4 Ultra plate. Enable max_print_bounds
+# segmentation to print it, or shrink face_settings.led_circle_tube.
+output_bounds:
+  width: 300    # mm
+  length: 165   # mm
+  height: 300   # mm

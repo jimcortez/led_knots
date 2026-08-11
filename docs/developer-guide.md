@@ -273,10 +273,10 @@ explicit handling:
   `upload-knot` remote uploads declared in [utils.py:56](../src/led_knots/core/utils.py#L56).
 - **`pyknotid`** ([pyproject.toml:27](../pyproject.toml#L27), sourced from
   GitHub via `[tool.uv.sources]`) — the source of truth for mathematical
-  knot parameterizations (used by `trefoil`, `figure_8`, `k4_1`, `k8_21`,
-  `stevedore`, and a few others). Knots that don't need it (e.g. `rod`,
-  `ring`, `helix`) should not import it. If `pyknotid` fails to install,
-  the analytical knots continue to work.
+  knot parameterizations and the DT-code catalogue (used by all 15 knotbook
+  slots). Shapes that don't need it (e.g. `rod`, `helix`, `sine_wave`) should
+  not import it. If `pyknotid` fails to install, the analytical shapes continue
+  to work.
 
 Graceful degradation means: catch `ImportError` at the point of use, surface
 a one-line "install X to enable Y" message, and let the rest of the
@@ -324,8 +324,9 @@ knot and every printable-output path. Before opening a PR:
    -m` form is preferred — see the console-script note above):
 
    ```bash
-   for k in rod twisted_rod quarter_turn ring jog_bend jog_bend_3d \
-            helix figure_8 trefoil k4_1 k8_21 stevedore; do
+   for k in rod twisted_rod quarter_turn jog_bend jog_bend_3d helix \
+            ring k2_1 trefoil k4_1 k5_2 k6_3 k7_1 k8_21 k9_2 k10_7 \
+            k11a6 k12a6 k13a6 k14n2 k15n3; do
      uv run python -m "led_knots.knots.${k}" --export "/tmp/${k}.stl" \
        || echo "FAIL: $k"
    done

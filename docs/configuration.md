@@ -79,7 +79,7 @@ its exported YAML snapshot.
 
 | Key | Command | Meaning |
 | --- | --- | --- |
-| `knot_type` | `render-knot` | Stem of a module under `src/led_knots/knots/` (e.g. `rod`, `trefoil`, `figure_8`). Required for knot renders. |
+| `knot_type` | `render-knot` | Stem of a module under `src/led_knots/knots/` (e.g. `rod`, `trefoil`, `k11a6`). Required for knot renders. |
 | `part_type` | `render-part` | Stem of a module under `src/led_knots/parts/` (e.g. `hang_clamp`, `planet_spacer`). Required for part renders. |
 
 Modules are discovered by filename — adding `my_knot.py` with a `build(config)`

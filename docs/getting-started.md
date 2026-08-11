@@ -77,13 +77,18 @@ Set `knot_type` in your config file to match a module stem under [src/led_knots/
 | `helix` | [helix.py](../src/led_knots/knots/helix.py) | Constant-pitch helical spiral. |
 | `sine_wave` | [sine_wave.py](../src/led_knots/knots/sine_wave.py) | Sinusoidal oscillation along an axis. |
 | `trefoil` | [trefoil.py](../src/led_knots/knots/trefoil.py) | Mathematical trefoil knot (3_1). |
-| `figure_8` | [figure_8.py](../src/led_knots/knots/figure_8.py) | Figure-8 / 4_1 knot. |
+| `k4_1` | [k4_1.py](../src/led_knots/knots/k4_1.py) | Figure-eight knot (4_1). |
 | `jog_bend` | [jog_bend.py](../src/led_knots/knots/jog_bend.py) | Planar S-shaped jog between two parallel lines. |
 | `jog_bend_3d` | [jog_bend_3d.py](../src/led_knots/knots/jog_bend_3d.py) | Same jog with explicit 3D orientation control. |
 | `quarter_turn` | [quarter_turn.py](../src/led_knots/knots/quarter_turn.py) | A single 90-degree corner. |
 | `twisted_rod` | [twisted_rod.py](../src/led_knots/knots/twisted_rod.py) | Straight rod with a 90-degree axial twist. |
 
-Additional modules ([k4_1.py](../src/led_knots/knots/k4_1.py), [k8_21.py](../src/led_knots/knots/k8_21.py), [stevedore.py](../src/led_knots/knots/stevedore.py)) work the same way — set `knot_type` to the filename stem.
+Those are the shapes to start with. The project's actual subject is a set of 15
+knots, from the unknot up to 15 crossings, one config each — see
+[knotbook.ipynb](../knotbook.ipynb) for previews and the
+[code map](code-map.md#the-15-knot-set) for the slot-by-slot table.
+
+Every other module under [src/led_knots/knots/](../src/led_knots/knots/) works the same way — set `knot_type` to the filename stem.
 
 To add a new path, see [Cookbook: paths](paths.md).
 

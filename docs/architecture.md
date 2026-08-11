@@ -139,9 +139,12 @@ src/led_knots/
 ├── knots/                      # One module per knot, each with build(config)
 │   ├── registry.py             # File-scan discovery and dispatch
 │   ├── __init__.py
-│   ├── figure_8.py, helix.py, jog_bend.py, jog_bend_3d.py,
-│   ├── k4_1.py, k8_21.py, quarter_turn.py, ring.py, rod.py,
-│   ├── sine_wave.py, stevedore.py, trefoil.py, twisted_rod.py
+│   ├── ring.py, k2_1.py, trefoil.py, k4_1.py, k5_2.py,   # the 15
+│   ├── k6_3.py, k7_1.py, k8_21.py, k9_2.py, k10_7.py,    # knotbook
+│   ├── k11a6.py, k12a6.py, k13a6.py, k14n2.py, k15n3.py, # slots
+│   ├── stevedore.py, k9_35.py, twist_ring.py,            # extra knots
+│   ├── helix.py, jog_bend.py, jog_bend_3d.py,
+│   ├── quarter_turn.py, rod.py, sine_wave.py, twisted_rod.py
 ├── optimize/                   # SLA / resin print optimisation stage
 │   ├── __init__.py             # optimize_part entry point
 │   ├── _tweaker.py             # Vendored Tweaker-3 orientation search

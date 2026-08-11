@@ -1,0 +1,18 @@
+knot_type: k6_3
+
+# 1.5x the default 200 x 110 x 200 build volume.
+#
+# The led_circle_tube profile is 30 mm across, so two non-adjacent stretches of
+# the centerline have to stay 30 mm apart or the swept tube passes through
+# itself. 6_3 sits ~13.9 mm apart at 1x, where the sweep does not error but
+# collapses to a sub-millimetre solid -- worse than a clean failure, because
+# nothing tells you. 1.5x is the smallest tested multiplier that produces real
+# geometry; verified bbox 263 x 300 x 122 mm.
+#
+# This no longer fits the Elegoo Saturn 4 Ultra plate. Enable max_print_bounds
+# segmentation to print it, or shrink
+# face_settings.led_circle_tube.outer_diameter and re-verify.
+output_bounds:
+  width: 300    # mm
+  length: 165   # mm
+  height: 300   # mm

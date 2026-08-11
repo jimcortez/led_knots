@@ -30,8 +30,8 @@ def test_render_bundle_stem():
 
 def test_run_name_from_knot_when_yaml_null(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    cfg = load_test_config(tmp_path, "knot_type: figure_8\n")
-    assert cfg.run_name == "figure_8"
+    cfg = load_test_config(tmp_path, "knot_type: k11a6\n")
+    assert cfg.run_name == "k11a6"
 
 
 def test_rendering_exports_defaults(tmp_path, monkeypatch):
