@@ -27,13 +27,14 @@ class FingerSensorHolderParams:
     base_thickness: float = 4.48
 
     wall_thickness: float = 2.29
+    # Wall heights are total heights from the print bed (base included).
     wall_full_height: float = 20.70
     rear_wall_low_height: float = 8.45
     rear_transition_length: float = 23.57
     front_transition_length: float = 4.90
 
     hinge_axis_from_rear: float = 22.70
-    hinge_axis_height_above_base: float = 14.40
+    hinge_axis_height_above_base: float = 12
     hinge_rod_diameter: float = 3.17
     hinge_outer_diameter: float = 5.02
 
@@ -44,7 +45,7 @@ class FingerSensorHolderParams:
     sensor_pcb_diameter: float = 15.80
     sensor_max_thickness: float = 3.60
 
-    sensor_pocket_diameter: float = 16.20
+    sensor_pocket_diameter: float = 17.20
     sensor_pocket_depth: float = 3.70
     sensor_exposed_opening_diameter: float = 15.00
 
@@ -59,7 +60,8 @@ class FingerSensorHolderParams:
     pedestal_length: float = 32.00
     pedestal_rear_height_above_base: float = 6.00
 
-    finger_trough_width: float = 15.00
+    # Wider than the pedestal so the trough cuts away its side walls entirely.
+    finger_trough_width: float = 19.00
     finger_trough_depth: float = 3.50
     finger_trough_length: float = 28.00
     finger_stop_radius: float = 8.00
@@ -136,8 +138,10 @@ def _corner_box(x0: float, y0: float, z0: float, dx: float, dy: float, dz: float
 def _wall_top_z(y: float, p: FingerSensorHolderParams) -> float:
     """Return absolute Z of the exterior wall top at longitudinal coordinate Y."""
     bz = p.base_thickness
-    full_z = bz + p.wall_full_height
-    rear_z = bz + p.rear_wall_low_height
+    # Wall heights are totals from Z=0, so the base thickness is part of the
+    # wall height rather than added beneath it.
+    full_z = p.wall_full_height
+    rear_z = p.rear_wall_low_height
     y_ff = p.front_transition_length
     y_rf = p.rear_full_height_y
     r_f = p.front_transition_radius
@@ -225,23 +229,27 @@ def _build_pedestal(p: FingerSensorHolderParams) -> cq.Solid:
 def _hinge_hole_cutter(p: FingerSensorHolderParams) -> cq.Solid:
     hole_r = 0.5 * p.hinge_rod_diameter + p.hinge_rod_clearance_mm
     axis_len = p.holder_width + 4.0
+    # Start the cutter 2mm outboard of the left face so it drills through
+    # both walls and barrels across the full holder width.
     pl = Plane(
-        origin=(p.lateral_center_x, p.hinge_axis_y, p.hinge_axis_z),
+        origin=(-2.0, p.hinge_axis_y, p.hinge_axis_z),
         normal=(1, 0, 0),
         xDir=(0, 1, 0),
     )
     hole_face = face(wire(circle(hole_r).moved(Location(pl))))
-    return extrude(hole_face, (axis_len, 0, 0)).moved(Location((-2.0, 0, 0)))
+    return extrude(hole_face, (axis_len, 0, 0))
 
 
 def _hinge_barrel(p: FingerSensorHolderParams, *, left: bool) -> cq.Solid:
     outer_r = 0.5 * p.hinge_outer_diameter
     inner_r = 0.5 * p.hinge_rod_diameter + p.hinge_rod_clearance_mm
-    depth = p.wall_thickness + 0.6
+    depth = p.wall_thickness
+    # Start the ring face on the wall's exterior face and extrude inward
+    # exactly one wall thickness so the barrel is flush with both the outer
+    # and inner wall faces.
     x_outer = 0.0 if left else p.holder_width
-    x_center = x_outer + (0.5 * depth if left else -0.5 * depth)
     pl = Plane(
-        origin=(x_center, p.hinge_axis_y, p.hinge_axis_z),
+        origin=(x_outer, p.hinge_axis_y, p.hinge_axis_z),
         normal=(1, 0, 0),
         xDir=(0, 1, 0),
     )
@@ -254,21 +262,59 @@ def _hinge_barrel(p: FingerSensorHolderParams, *, left: bool) -> cq.Solid:
 
 
 def _finger_trough_cutter(p: FingerSensorHolderParams) -> cq.Solid:
+    """Ramped finger channel: bottom starts at the base floor at the pedestal
+    front face and slopes up so the fingertip lands on the sensor face."""
     cx = p.lateral_center_x
-    cy = p.pedestal_front_offset + p.finger_trough_front_blend_length + 0.5 * p.finger_trough_length
-    trough_top_z = p.base_thickness + p.pedestal_front_height - 0.4
-    tool = (
-        cq.Workplane("XZ")
-        .workplane(offset=cy)
-        .center(cx, trough_top_z - 0.5 * p.finger_trough_depth)
-        .ellipse(0.5 * p.finger_trough_width, 0.5 * p.finger_trough_depth)
-        .extrude(0.5 * p.finger_trough_length, both=True)
-        .val()
+    depth = p.finger_trough_depth
+
+    y_start = p.pedestal_front_offset
+    y_end = y_start + p.finger_trough_front_blend_length + p.finger_trough_length
+    z_bot_start = p.base_thickness
+    # The sensor pocket assumes the trough surface sits trough_depth below the
+    # pedestal front height at the sensor — the ramp must hit that exactly.
+    z_bot_sensor = p.base_thickness + p.pedestal_front_height - depth
+    slope = (z_bot_sensor - z_bot_start) / max(p.sensor_center_y - y_start, 1e-9)
+
+    # Small lead-in ahead of the pedestal face for a clean boolean and a
+    # smooth entry off the floor.
+    lead = 0.8
+    y0 = y_start - lead
+    z0 = z_bot_start - lead * slope
+    direction = (0.0, y_end - y0, (y_end - y0) * slope)
+
+    # Elliptical channel bottom, extruded along the ramp direction.
+    pl = Plane(origin=(cx, y0, z0 + 0.5 * depth), normal=(0, 1, 0), xDir=(1, 0, 0))
+    ell_face = face(wire(ellipse(0.5 * p.finger_trough_width, 0.5 * depth).moved(Location(pl))))
+    tool = extrude(ell_face, direction)
+
+    # Open the channel to the sky so it cuts a trough, not a tunnel.
+    clear_h = p.wall_full_height
+    pl_rect = Plane(
+        origin=(cx, y0, z0 + 0.5 * depth + 0.5 * clear_h),
+        normal=(0, 1, 0),
+        xDir=(1, 0, 0),
     )
-    stop_x = cx
-    stop_y = cy + 0.5 * p.finger_trough_length - p.finger_stop_radius
-    stop_z = trough_top_z
-    stop_pl = Plane(origin=(stop_x, stop_y, stop_z), normal=(0, 1, 0), xDir=(1, 0, 0))
+    rect_face = face(wire(rect(p.finger_trough_width, clear_h).moved(Location(pl_rect))))
+    tool = fuse(tool, extrude(rect_face, direction))
+
+    # Trim the tool to just above the base floor: the flat ellipse would
+    # otherwise graze the base top plane at the entry, leaving a paper-thin
+    # groove that tessellates non-watertight at export tolerance.
+    floor_eps = 0.1
+    trim = _corner_box(
+        cx - p.finger_trough_width,
+        y0 - 1.0,
+        z0 - 1.0,
+        2.0 * p.finger_trough_width,
+        (y_end - y0) + 2.0,
+        (p.base_thickness + floor_eps) - (z0 - 1.0),
+    )
+    tool = cut(tool, trim)
+
+    # Rounded finger stop scoop at the rear end of the ramp.
+    stop_y = y_end - p.finger_stop_radius
+    stop_z = z0 + (stop_y - y0) * slope + depth
+    stop_pl = Plane(origin=(cx, stop_y, stop_z), normal=(0, 1, 0), xDir=(1, 0, 0))
     stop = extrude(face(wire(circle(p.finger_stop_radius).moved(Location(stop_pl)))), (0, p.finger_stop_radius, 0))
     return fuse(tool, stop)
 
@@ -410,6 +456,11 @@ def build_retention_plate(p: FingerSensorHolderParams) -> cq.Solid:
     fused = plate
     for tab in tabs:
         fused = fuse(fused, tab)
+    # Park the plate beside the holder so both parts print side by side
+    # instead of overlapping at the sensor position.
+    print_gap = 5.0
+    plate_center_x = p.holder_width + print_gap + outer_r
+    fused = fused.moved(Location((plate_center_x - cx, 0.0, 0.0)))
     return clean(fused)
 
 

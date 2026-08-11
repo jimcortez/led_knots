@@ -53,9 +53,9 @@ build-backend = "hatchling.build"
 packages = ["src/led_knots"]
 
 [tool.uv.sources]
-pyknotid = { git = "https://github.com/sashakolpakov/pyknotid.git" }
 py-lib3mf = { git = "https://github.com/jdegenstein/py-lib3mf", tag="v2.4.1.2"}
 cadquery-web-viewer = { path = "../yet-another-cad-viewer", editable = true }
+pyknotid = { git = "https://github.com/jimcortez/pyknotid" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
