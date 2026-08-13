@@ -133,17 +133,23 @@ Net effect: the printed parts overlap axially by `lap_overlap_mm`, hide a steppe
 
 ## `tube_gap` (open segment)
 
-Unrelated to `max_print_bounds` segmentation: `tube_gap` cuts an **intentional gap out of the sweep path itself** so you can feed wires/LED strips through the cavity later. The path polyline is shortened before the sweep runs, so the resulting tube has a missing arc-length region.
+Unrelated to `max_print_bounds` segmentation: `tube_gap` cuts an **intentional gap out of the tube** so you can feed wires/LED strips through the cavity later. Two strategies are used depending on the path:
 
-Config block under `tube_gap` (see [TubeGapSettings](../src/led_knots/core/config.py#L183)):
+- **Closed-loop knots** (the pyknotid knots drawn via `draw_knot_points`): the point loop is rolled and trimmed by `open_loop_with_gap` before splining, so the sweep is open and its end caps *are* the gap faces. A boolean cut is deliberately avoided here — a closed sweep has coincident start/end caps, and OCC booleans corrupt self-touching solids (webbed faces, open shells).
+- **Open paths**: a boolean subtraction — an oversized disc is swept along the sub-path between arc lengths `s0..s1` and cut from the swept tube.
+
+In both cases the gap faces are normal to the path tangent and the gap length is exact when measured along the path — even on curved knots.
+
+Config block under `tube_gap` (see [TubeGapSettings](../src/led_knots/core/config.py#L194)):
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `enabled` | `false` | Master toggle. |
-| `gap_length_mm` | `0.0` | Arc-length of the gap to remove (mm), measured as the chord-length sum between successive sampled points. Internally clamped to at most `0.8 * total_polyline_length`. Must be `>= 0`. |
-| `center_fraction` | `0.0` | Where to center the gap along the polyline, in `[-0.5, 0.5]`. `0.0` = polyline midpoint; `-0.5` biases toward the start, `+0.5` toward the end. Hard-clamped to that range. |
+| `enabled` | `false` | Master toggle. Requires `gap_length_mm > 0` when on. |
+| `gap_length_mm` | `0.0` | Arc length of tube removed by the subtraction (mm). Internally clamped to at most `0.8 * total_path_length` (with a warning). |
+| `center_fraction` | `0.0` | Where to center the gap along the path arc length, in `[-0.5, 0.5]`. `0.0` = path midpoint; `-0.5` biases toward the start, `+0.5` toward the end. The center shifts inward if needed so the full gap always fits. |
+| `cutter_radius_mm` | `null` | Open paths only (boolean strategy). Radius of the swept cutter disc. `null` = auto (`1.5 × tube_settings.outer_radius`). Shrink it if the oversized cutter would nick a neighboring strand where the knot passes near itself; it must still exceed the tube's outermost extent to sever it cleanly. |
 
-The actual point removal happens in [apply_gap_to_polyline_points](../src/led_knots/core/path_utils.py#L36); the helper returns a `PathGapInfo` with the cut-side endpoints, midpoint, and unit tangent across the gap, which downstream code uses to place the clamp.
+The implementation lives in [core/tube_gap.py](../src/led_knots/core/tube_gap.py): `open_loop_with_gap` handles closed loops at the point level (invoked by `draw_knot_points` when `drop_last == 0`), while `compute_gap_placement` + `build_gap_cutter` + `apply_tube_gap` implement the boolean strategy for open paths inside `draw_part` (`compute_gap_placement` returns a `TubeGapPlacement` with start/end/mid points and unit tangent for clamp placement). For segmented prints of open paths the cutter is applied per-segment inside `build_segmented_tube_assembly` while segments are still in path coordinates; if a segment boundary falls inside the gap span, a warning is logged because the joint features at that cut get carved away. `apply_tube_gap` raises if handed a closed sweep rather than corrupting it.
 
 ## Clamps
 

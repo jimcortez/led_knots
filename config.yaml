@@ -161,8 +161,17 @@ max_print_bounds:
 # -----------------------------------------------------------------------------
 tube_gap:
   enabled: false
-  gap_length_mm: 25.0        # mm – arc-length gap in the sweep path
+  gap_length_mm: 25.0        # mm – gap measured along the path (boolean-subtracted from the tube)
   center_fraction: 0.0       # [-0.5, 0.5] – 0.0 centered along the path
+  cutter_radius_mm: null     # mm – cutter disc radius; null = auto (1.5 × tube outer_radius)
+  # manual: use center_fraction as-is. lowest_z: derive the fraction that puts
+  # the gap at the lowest point of the auto-oriented knot so it drains/vents
+  # the internal channels (SLA anti-suction). Requires --auto-orient, a closed
+  # (non-drop_last) knot, and a single-piece build (not max_print_bounds
+  # segmentation); otherwise falls back to center_fraction with a warning.
+  # center_fraction still seeds the provisional pass-1 gap. Costs one extra
+  # sweep (orientation probe) per render.
+  placement: manual
 
 clamp:
   enabled: true
@@ -197,12 +206,12 @@ finger_sensor_holder:
   holder_length: 67.00              # mm
   base_thickness: 4.48              # mm
   wall_thickness: 2.29              # mm
-  wall_full_height: 20.70            # mm above base top
-  rear_wall_low_height: 8.45        # mm above base top at rear edge
+  wall_full_height: 20.70            # mm total height, including base thickness
+  rear_wall_low_height: 8.45        # mm total height at rear edge, including base
   rear_transition_length: 23.57      # mm
   front_transition_length: 4.90     # mm
   hinge_axis_from_rear: 22.70        # mm
-  hinge_axis_height_above_base: 14.40  # mm
+  hinge_axis_height_above_base: 10.7  # mm
   hinge_rod_diameter: 3.17          # mm
   hinge_outer_diameter: 5.02        # mm
   pedestal_front_offset: 9.50       # mm from front edge
@@ -210,7 +219,7 @@ finger_sensor_holder:
   pedestal_front_height: 10.00       # mm above base top
   sensor_pcb_diameter: 15.80        # mm
   sensor_max_thickness: 3.60         # mm
-  sensor_pocket_diameter: 16.20      # mm (recommended; editable)
+  sensor_pocket_diameter: 17.20      # mm (recommended; editable)
   sensor_pocket_depth: 3.70          # mm (recommended; editable)
   sensor_exposed_opening_diameter: 15.00  # mm (recommended; editable)
   cable_channel_width: 4.50         # mm (recommended; editable)
@@ -221,7 +230,7 @@ finger_sensor_holder:
   rear_transition_radius: 2.50       # mm quarter-round at rear wall decline
   pedestal_length: 32.00             # mm
   pedestal_rear_height_above_base: 6.00  # mm
-  finger_trough_width: 15.00         # mm
+  finger_trough_width: 19.00         # mm (wider than pedestal: no trough side walls)
   finger_trough_depth: 3.50          # mm
   finger_trough_length: 28.00        # mm
   finger_stop_radius: 8.00            # mm

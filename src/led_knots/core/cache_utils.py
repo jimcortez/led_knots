@@ -147,6 +147,19 @@ def config_settings_hash(config) -> str:
             "flank_angle_deg": _round_for_hash(mp.joint.flank_angle_deg),
         },
     }
+    tg = getattr(config, "tube_gap", None)
+    if tg is not None:
+        out["tube_gap"] = {
+            "enabled": bool(tg.enabled),
+            "gap_length_mm": _round_for_hash(tg.gap_length_mm),
+            "center_fraction": _round_for_hash(tg.center_fraction),
+            "placement": str(getattr(tg, "placement", "manual")),
+            "cutter_radius_mm": (
+                _round_for_hash(tg.cutter_radius_mm)
+                if tg.cutter_radius_mm is not None
+                else None
+            ),
+        }
     # Include print_optimization so toggling --optimize / --auto-orient
     # invalidates stale preview STLs (orientation mutates exported geometry).
     po = getattr(config, "print_optimization", None)

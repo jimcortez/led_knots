@@ -43,7 +43,7 @@ def test_params_from_config_overlay(tmp_path, argv_guard) -> None:
     cfg = Config(args=parse_render_args())
     params = FingerSensorHolderParams.from_config(cfg)
     assert params.holder_width == 30.00
-    assert params.sensor_pocket_diameter == 16.20
+    assert params.sensor_pocket_diameter == 17.20
 
 
 def test_side_walls_align_with_base_edges() -> None:
@@ -82,7 +82,9 @@ def test_holder_encloses_sensor_pocket_region() -> None:
     assert bb.xmax >= p.pedestal_right_x
     assert bb.ymin <= 0.0
     assert bb.ymax >= p.holder_length - 1e-3
-    assert bb.zmax >= p.base_thickness + p.wall_full_height - 2.0
+    # wall_full_height is measured from Z=0 (base thickness included), so the
+    # holder top should reach wall_full_height, not base_thickness + wall_full_height.
+    assert bb.zmax >= p.wall_full_height - 2.0
 
 
 def test_prototype_tuning_list_includes_sensor_pocket() -> None:

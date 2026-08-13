@@ -207,13 +207,11 @@ Used by `sample_path_for_profiles` and by the tube model implementations. This i
 
 Helpers: `frame_at_arc_length(frames, s)` returns a frame at an arbitrary arc length (linearly interpolating the origin, snapping the basis to the nearest upstream frame), and `frame_to_dict(frame)` produces the legacy dict shape that older consumers expect.
 
-### `apply_gap_to_polyline_points(points, gap_length_mm, center_fraction=0.0)`
+### `compute_gap_placement(path, gap_length_mm, center_fraction=0.0, *, n_samples=1001)`
 
-Defined in [path_utils.py:36](../src/led_knots/core/path_utils.py#L36).
+Defined in [tube_gap.py](../src/led_knots/core/tube_gap.py).
 
-Removes a contiguous chord-length segment from a polyline (used for cutting a physical gap into a closed-looking knot before splining). Returns the trimmed points and a `PathGapInfo` describing where the gap landed (start/end indices, mid point, tangent). `center_fraction` in `[-0.5, 0.5]` biases the gap toward the start (negative) or end (positive) of the polyline.
-
-Not currently called from any of the built-in knot modules — it exists for tooling that wants to introduce a print joint at a controlled location. `draw_knot_points(..., drop_last=10)` is the manual equivalent.
+Resolves where the configured `tube_gap` lands on an open sweep path: returns a `TubeGapPlacement` with the arc-length span `[s0, s1]`, the on-path start/end/mid points, and the unit tangent at the midpoint (used to place the clamp). The gap itself is produced by `build_gap_cutter` + `apply_tube_gap`, which boolean-subtract a swept disc from the finished tube. Closed-loop knots instead use `open_loop_with_gap(points, gap_length_mm, center_fraction)` (same module), which rolls and trims the point loop before splining so the sweep is open with the gap at its ends — `draw_knot_points` applies it automatically. See [print-segmentation.md](print-segmentation.md#tube_gap-open-segment). `draw_knot_points(..., drop_last=10)` remains the manual point-dropping alternative for opening a loop at its seam.
 
 ### `draw_knot_points(points, config, *, drop_last=1, bounds=None, preserve_aspect_ratio=True, aux=True, num_samples=150, spine_offset_radius=5.0)`
 

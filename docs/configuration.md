@@ -313,20 +313,26 @@ Registration geometry between adjacent segments.
 
 ### `tube_gap`
 
-Opens a length of the swept tube to insert wiring and LEDs.
+Opens a length of the swept tube to insert wiring and LEDs. Closed-loop knots open the loop at the point level before sweeping (the sweep's end caps become the gap faces); open paths get a boolean subtraction of a disc swept along the gap's sub-path.
 
 ```yaml
 tube_gap:
   enabled: false
   gap_length_mm: 25.0
   center_fraction: 0.0
+  cutter_radius_mm: null
+  placement: manual
 ```
 
 | Key | Type | Default | Units | Description |
 | --- | --- | --- | --- | --- |
-| `tube_gap.enabled` | bool | `false` | — | Master switch for the gap. |
-| `tube_gap.gap_length_mm` | float | 0.0 | mm | Arc length removed from the sweep path. Must be `>= 0`. |
-| `tube_gap.center_fraction` | float | 0.0 | — | Where to center the gap along the polyline length. `0.0` = centered; range `[-0.5, 0.5]`. Outside that range raises `ValueError`. |
+| `tube_gap.enabled` | bool | `false` | — | Master switch for the gap. Requires `gap_length_mm > 0` when on (else `ValueError`). |
+| `tube_gap.gap_length_mm` | float | 0.0 | mm | Arc length of tube removed by the boolean subtraction, measured along the path. Must be `>= 0`; clamped to 80% of the path length. |
+| `tube_gap.center_fraction` | float | 0.0 | — | Where to center the gap along the path arc length. `0.0` = centered; range `[-0.5, 0.5]`. Outside that range raises `ValueError`. |
+| `tube_gap.cutter_radius_mm` | float\|null | `null` | mm | Cutter disc radius; `null` = auto (`1.5 × tube_settings.outer_radius`). Must be `> 0` when set. |
+| `tube_gap.placement` | `manual` \| `lowest_z` | `manual` | — | `lowest_z` derives the fraction that puts the gap at the lowest point of the auto-oriented knot, so the gap drains/vents the tube's internal channels (SLA anti-suction). Requires `--auto-orient`, a closed knot, and a single-piece build; otherwise it falls back to `center_fraction` with a warning (`tube_gap.placement_fallback` in the stats export). `center_fraction` seeds the provisional pass-1 gap; the resolved value is recorded as `tube_gap.resolved_center_fraction`. Costs one extra sweep per render. |
+
+Not compatible with `braided_rope` `fuse_method: mesh` (the cut needs B-rep geometry). See [print-segmentation.md](print-segmentation.md#tube_gap-open-segment) for behavior details and the clamp that closes the gap.
 
 ### `clamp`
 

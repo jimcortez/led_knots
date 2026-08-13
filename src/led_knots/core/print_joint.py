@@ -55,9 +55,42 @@ def joint_radial_direction(
     return _unit(x)
 
 
-def _frame_location(origin_xyz: Tuple[float, float, float], z_dir: np.ndarray, ref_up: np.ndarray) -> cq.Location:
+def _joint_frame_at_point(
+    wire,
+    point_xyz: Sequence[float],
+    *,
+    num_samples: int,
+) -> Tuple[Tuple[float, float, float], np.ndarray, np.ndarray]:
+    """Parallel-transported (origin, tangent, x_dir) on ``wire`` nearest to ``point_xyz``."""
+    from .path_frames import sample_path_frames
+
+    if num_samples < 2:
+        raise ValueError("num_samples must be >= 2 for joint framing")
+    frames = sample_path_frames(wire, num_samples)
+    tx, ty, tz = float(point_xyz[0]), float(point_xyz[1]), float(point_xyz[2])
+    best = min(
+        frames,
+        key=lambda f: (f.point.x - tx) ** 2 + (f.point.y - ty) ** 2 + (f.point.z - tz) ** 2,
+    )
+    origin = (float(best.point.x), float(best.point.y), float(best.point.z))
+    tangent = _unit(np.array([best.tangent.x, best.tangent.y, best.tangent.z], dtype=float))
+    x_dir = _unit(np.array([best.x_dir.x, best.x_dir.y, best.x_dir.z], dtype=float))
+    return origin, tangent, x_dir
+
+
+def _frame_location(
+    origin_xyz: Tuple[float, float, float],
+    z_dir: np.ndarray,
+    x_dir: np.ndarray,
+) -> cq.Location:
     z = _unit(z_dir)
-    x = joint_radial_direction(z_dir, ref_up)
+    x = _unit(x_dir)
+    x = x - np.dot(x, z) * z
+    n = float(np.linalg.norm(x))
+    if n < 1e-9:
+        x = joint_radial_direction(z)
+    else:
+        x = x / n
     plane = cq.Plane(
         origin=cq.Vector(float(origin_xyz[0]), float(origin_xyz[1]), float(origin_xyz[2])),
         xDir=cq.Vector(float(x[0]), float(x[1]), float(x[2])),
@@ -146,12 +179,12 @@ def _make_lap_rabbet_feature(joint_cfg, outer_radius: float, *, male: bool):
 def apply_lap_joint_features(
     part_obj,
     *,
+    wire_seg,
+    frame_samples: int,
     part_idx: int,
     part_count: int,
     start_point: Sequence[float],
     end_point: Sequence[float],
-    start_tangent: Sequence[float],
-    end_tangent: Sequence[float],
     config,
 ):
     """Add outer-wall rabbets at internal segment boundaries (complements axial overlap)."""
@@ -163,17 +196,22 @@ def apply_lap_joint_features(
         return part_obj
 
     shape = _shape_from_any(part_obj)
-    ref_up = np.array([0.0, 0.0, 1.0], dtype=float)
     outer_r = float(config.tube_settings.outer_radius)
 
     if part_idx > 0:
-        loc_start = _frame_location(tuple(start_point), _unit(np.array(start_tangent, dtype=float)), ref_up)
+        origin, tan, x_dir = _joint_frame_at_point(
+            wire_seg, start_point, num_samples=frame_samples
+        )
+        loc_start = _frame_location(origin, tan, x_dir)
         female = _make_lap_rabbet_feature(mp.joint, outer_r, male=False)
         if female is not None:
             shape = shape.cut(female.moved(loc_start))
 
     if part_idx < part_count - 1:
-        loc_end = _frame_location(tuple(end_point), _unit(np.array(end_tangent, dtype=float)), ref_up)
+        origin, tan, x_dir = _joint_frame_at_point(
+            wire_seg, end_point, num_samples=frame_samples
+        )
+        loc_end = _frame_location(origin, tan, x_dir)
         male = _make_lap_rabbet_feature(mp.joint, outer_r, male=True)
         if male is not None:
             shape = shape.fuse(male.moved(loc_end))
@@ -230,12 +268,12 @@ def _make_dovetail_feature(joint_cfg, male: bool, *, outer_radius: float):
 def apply_registration_features(
     part_obj,
     *,
+    wire_seg,
+    frame_samples: int,
     part_idx: int,
     part_count: int,
     start_point: Sequence[float],
     end_point: Sequence[float],
-    start_tangent: Sequence[float],
-    end_tangent: Sequence[float],
     config,
 ):
     """
@@ -250,13 +288,15 @@ def apply_registration_features(
         return part_obj
 
     shape = _shape_from_any(part_obj)
-    ref_up = np.array([0.0, 0.0, 1.0], dtype=float)
     jc = mp.joint
     outer_r = float(config.tube_settings.outer_radius)
 
     # Start boundary (female) for all but first piece.
     if part_idx > 0:
-        loc_start = _frame_location(tuple(start_point), _unit(np.array(start_tangent, dtype=float)), ref_up)
+        origin, tan, x_dir = _joint_frame_at_point(
+            wire_seg, start_point, num_samples=frame_samples
+        )
+        loc_start = _frame_location(origin, tan, x_dir)
         female = (
             _make_twin_pin_features(jc, male=False, outer_radius=outer_r)
             if jc.style == "twin_pin"
@@ -266,7 +306,10 @@ def apply_registration_features(
 
     # End boundary (male) for all but last piece.
     if part_idx < part_count - 1:
-        loc_end = _frame_location(tuple(end_point), _unit(np.array(end_tangent, dtype=float)), ref_up)
+        origin, tan, x_dir = _joint_frame_at_point(
+            wire_seg, end_point, num_samples=frame_samples
+        )
+        loc_end = _frame_location(origin, tan, x_dir)
         male = (
             _make_twin_pin_features(jc, male=True, outer_radius=outer_r)
             if jc.style == "twin_pin"

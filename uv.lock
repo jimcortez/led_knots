@@ -81,15 +81,6 @@ wheels = [
 ]
 
 [[package]]
-name = "appdirs"
-version = "1.4.4"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/d7/d8/05696357e0311f5b5c316d7b95f46c669dd9c15aaeecbb48c7d0aeb88c40/appdirs-1.4.4.tar.gz", hash = "sha256:7d5d0167b2b1ba821647616af46a749d1c653740dd0d2415100fe26e27afdf41", size = 13470, upload-time = "2020-05-11T07:59:51.037Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3b/00/2344469e2084fb287c2e0b57b72910309874c3245463acd6cf5e3db69324/appdirs-1.4.4-py2.py3-none-any.whl", hash = "sha256:a841dacd6b99318a741b166adb07e19ee71a274450e68237b4650ca1055ab128", size = 9566, upload-time = "2020-05-11T07:59:49.499Z" },
-]
-
-[[package]]
 name = "appnope"
 version = "0.1.4"
 source = { registry = "https://pypi.org/simple" }
@@ -1206,7 +1197,7 @@ requires-dist = [
     { name = "numpy-stl", specifier = ">=3.2.0" },
     { name = "pillow", specifier = ">=11.0.0" },
     { name = "py-lib3mf", git = "https://github.com/jdegenstein/py-lib3mf?tag=v2.4.1.2" },
-    { name = "pyknotid", git = "https://github.com/sashakolpakov/pyknotid.git" },
+    { name = "pyknotid", git = "https://github.com/jimcortez/pyknotid" },
     { name = "pyrender", specifier = ">=0.1.45" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0" },
@@ -1839,13 +1830,13 @@ wheels = [
 [[package]]
 name = "pyknotid"
 version = "0.5.4"
-source = { git = "https://github.com/sashakolpakov/pyknotid.git#cf11ab0c850d528d1ec9a0d9e26311f016cf1e2c" }
+source = { git = "https://github.com/jimcortez/pyknotid#166f74a74113e13721f010c22238029f64ae418c" }
 dependencies = [
-    { name = "appdirs" },
     { name = "networkx" },
     { name = "numpy" },
     { name = "peewee" },
     { name = "planarity" },
+    { name = "platformdirs" },
     { name = "requests" },
     { name = "sympy" },
     { name = "tqdm" },

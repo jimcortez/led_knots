@@ -193,6 +193,17 @@ def _as_shape(obj):
     return obj.val() if hasattr(obj, "val") else obj
 
 
+def _bboxes_overlap(a, b, tol: float = 0.1) -> bool:
+    return (
+        a.xmin <= b.xmax + tol
+        and b.xmin <= a.xmax + tol
+        and a.ymin <= b.ymax + tol
+        and b.ymin <= a.ymax + tol
+        and a.zmin <= b.zmax + tol
+        and b.zmin <= a.zmax + tol
+    )
+
+
 def _rotate_shape(shape, euler_xyz_deg: Tuple[float, float, float]):
     rx, ry, rz = euler_xyz_deg
     rotated = shape.rotate((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), float(rx))
@@ -208,6 +219,7 @@ def build_segmented_tube_assembly(
     *,
     aux=None,
     face_kwargs: Optional[dict] = None,
+    tube_gap_handled: bool = False,
 ) -> cq.Assembly:
     face_kwargs = face_kwargs or {}
     sampled_points, t_vals = sample_wire_points(path, n_samples=config.max_print_bounds.path_samples)
@@ -220,6 +232,34 @@ def build_segmented_tube_assembly(
 
     plans = plan_segments(sampled_points, config)
     assy = cq.Assembly(name=f"{config.name or 'knot'} segmented")
+
+    # Build the tube-gap cutter once from the full path; each segment that
+    # overlaps it gets cut below, while segments are still in path coordinates
+    # (the layout rotation/translation happens after).
+    gap_cutter = None
+    tg = getattr(config, "tube_gap", None)
+    if tg is not None and tg.enabled and tg.gap_length_mm > 0 and not tube_gap_handled:
+        from .tube_gap import build_gap_cutter, compute_gap_placement, gap_cutter_radius
+
+        placement = compute_gap_placement(
+            path, tg.gap_length_mm, center_fraction=tg.center_fraction
+        )
+        gap_cutter = build_gap_cutter(path, placement, gap_cutter_radius(config))
+        seg_lens = np.linalg.norm(
+            np.diff(np.asarray(sampled_points, dtype=float), axis=0), axis=1
+        )
+        cum_len = np.concatenate(([0.0], np.cumsum(seg_lens)))
+        for plan in plans[:-1]:
+            boundary_s = float(cum_len[plan.end_idx])
+            if placement.s0 < boundary_s < placement.s1:
+                logger.warning(
+                    "tube_gap: segment boundary at arc length %.1f mm falls "
+                    "inside the gap span %.1f–%.1f mm; joint features at that "
+                    "cut will be carved away.",
+                    boundary_s,
+                    placement.s0,
+                    placement.s1,
+                )
     print_bed_layout = config.max_print_bounds.layout == "print_bed"
     cursor_x = 0.0
 
@@ -270,33 +310,34 @@ def build_segmented_tube_assembly(
         part_obj = build_segment_fn(wire_seg, config, aux=aux_seg, face_kwargs=face_kwargs)
         part_shape = _as_shape(part_obj)
 
-        # Tangents from neighboring points in the sampled polyline.
         s = plan.start_idx
         e = plan.end_idx
-        start_tan = np.array(sampled_points[min(s + 1, len(sampled_points) - 1)], dtype=float) - np.array(
-            sampled_points[s], dtype=float
-        )
-        end_tan = np.array(sampled_points[e], dtype=float) - np.array(sampled_points[max(e - 1, 0)], dtype=float)
+        frame_samples = max(2, len(seg_pts))
         part_shape = apply_lap_joint_features(
             part_shape,
+            wire_seg=wire_seg,
+            frame_samples=frame_samples,
             part_idx=idx,
             part_count=len(plans),
             start_point=sampled_points[s],
             end_point=sampled_points[e],
-            start_tangent=start_tan,
-            end_tangent=end_tan,
             config=config,
         )
         part_shape = apply_registration_features(
             part_shape,
+            wire_seg=wire_seg,
+            frame_samples=frame_samples,
             part_idx=idx,
             part_count=len(plans),
             start_point=sampled_points[s],
             end_point=sampled_points[e],
-            start_tangent=start_tan,
-            end_tangent=end_tan,
             config=config,
         )
+
+        if gap_cutter is not None and _bboxes_overlap(
+            part_shape.BoundingBox(), gap_cutter.BoundingBox()
+        ):
+            part_shape = part_shape.cut(gap_cutter)
 
         euler = plan.euler_xyz_deg
         if sla_rescore:

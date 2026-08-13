@@ -8,8 +8,6 @@ construction for ribbon sweeps along arbitrary paths.
 import math
 import numpy as np
 from cadquery.func import spline
-from dataclasses import dataclass
-from typing import List, Sequence, Tuple, Optional
 
 
 def _normalize(v: np.ndarray) -> np.ndarray:
@@ -18,102 +16,6 @@ def _normalize(v: np.ndarray) -> np.ndarray:
     if mag < 1e-10:
         return np.zeros_like(v)
     return v / mag
-
-
-@dataclass(frozen=True)
-class PathGapInfo:
-    """Metadata about an applied path gap (in point-space, chord-length based)."""
-
-    gap_length_mm: float
-    start_index: int
-    end_index: int
-    start_point: Tuple[float, float, float]
-    end_point: Tuple[float, float, float]
-    mid_point: Tuple[float, float, float]
-    tangent: Tuple[float, float, float]
-
-
-def apply_gap_to_polyline_points(
-    points: Sequence[Tuple[float, float, float]],
-    gap_length_mm: float,
-    center_fraction: float = 0.0,
-) -> Tuple[List[Tuple[float, float, float]], Optional[PathGapInfo]]:
-    """
-    Remove a contiguous arc-length segment from a polyline point sequence.
-
-    This is intended for knots represented as sampled points that later become a spline.
-    The arc-length is approximated by chord lengths between successive points.
-
-    Args:
-        points: List/sequence of (x,y,z) points. Expected to be ordered along the path.
-        gap_length_mm: Gap length along the polyline (mm). If <= 0, no gap is applied.
-        center_fraction: Where to place the gap center along the polyline length, in [-0.5, 0.5].
-            0.0 means centered. -0.5 biases toward the start, +0.5 toward the end.
-
-    Returns:
-        (new_points, gap_info). gap_info is None when no gap applied.
-    """
-    pts = list((float(x), float(y), float(z)) for (x, y, z) in points)
-    n = len(pts)
-    if n < 3 or gap_length_mm <= 0:
-        return pts, None
-
-    # Compute chord-length cumulative arc.
-    seg_lens = []
-    for i in range(n - 1):
-        a = np.array(pts[i], dtype=float)
-        b = np.array(pts[i + 1], dtype=float)
-        seg_lens.append(float(np.linalg.norm(b - a)))
-    total_len = float(sum(seg_lens))
-    if total_len <= 1e-9:
-        return pts, None
-
-    gap_len = float(min(gap_length_mm, max(0.0, total_len * 0.8)))
-    # Center target along arc length.
-    cf = float(max(-0.5, min(0.5, center_fraction)))
-    center_s = (0.5 + cf) * total_len
-    s0 = max(0.0, center_s - 0.5 * gap_len)
-    s1 = min(total_len, center_s + 0.5 * gap_len)
-    if s1 - s0 <= 1e-6:
-        return pts, None
-
-    # Find indices spanning [s0, s1].
-    cum = 0.0
-    start_idx = 0
-    while start_idx < n - 2 and cum + seg_lens[start_idx] < s0:
-        cum += seg_lens[start_idx]
-        start_idx += 1
-    # cum is arc length at start_idx
-    cum2 = cum
-    end_idx = start_idx + 1
-    while end_idx < n - 1 and cum2 < s1:
-        cum2 += seg_lens[end_idx - 1]
-        end_idx += 1
-    end_idx = min(end_idx, n - 1)
-
-    # Ensure we remove at least one interior point.
-    if end_idx <= start_idx + 1:
-        return pts, None
-
-    start_point = pts[start_idx]
-    end_point = pts[end_idx]
-    mid_arr = 0.5 * (np.array(start_point, dtype=float) + np.array(end_point, dtype=float))
-    mid_point = (float(mid_arr[0]), float(mid_arr[1]), float(mid_arr[2]))
-    tan_arr = np.array(end_point, dtype=float) - np.array(start_point, dtype=float)
-    tan_arr = _normalize(tan_arr)
-    tangent = (float(tan_arr[0]), float(tan_arr[1]), float(tan_arr[2]))
-
-    new_pts = pts[: start_idx + 1] + pts[end_idx:]
-    info = PathGapInfo(
-        gap_length_mm=gap_len,
-        start_index=start_idx,
-        end_index=end_idx,
-        start_point=start_point,
-        end_point=end_point,
-        mid_point=mid_point,
-        tangent=tangent,
-    )
-    return new_pts, info
 
 
 def sample_path_curvature(path, num_samples: int = 50) -> list:

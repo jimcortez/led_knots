@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "optimize_part",
+    "select_orientation",
     "best_orientation_index",
     "drill_drain_holes",
     "OptimizationReport",
@@ -297,7 +298,7 @@ def _populate_optimize_stats(render_stats, report: OptimizationReport) -> None:
         )
 
 
-def optimize_part(
+def select_orientation(
     part: _PartT,
     opt_settings: PrintOptimizationSettings,
     *,
@@ -306,37 +307,22 @@ def optimize_part(
     tube_settings=None,
     output_bounds=None,
     bed_clearance_mm: float = 2.0,
-    render_stats=None,
-) -> Tuple[_PartT, OptimizationReport]:
+    mesh: "trimesh.Trimesh" = None,
+):
     """
-    Analyze a built part for SLA-print problems and (optionally) re-orient it.
+    Rank orientation candidates for ``part`` without mutating it.
 
-    Returns ``(maybe_rotated_part, report)``. The caller is responsible for
-    logging or otherwise consuming the report — this function does not print.
+    This is the search half of ``optimize_part`` — Tweaker-3 search,
+    connector-aware rescoring, and the bed-fit gate — factored out so the
+    tube-gap placement pre-pass can pick an orientation before the final
+    sweep and then pin it. ``mesh`` may be supplied to skip tessellation.
 
-    Assemblies and parts produced by the segmented-build flow are out of
-    scope for PR 1 and return a no-op report with a ``note``.
+    Returns ``(mesh, candidates, connector_tags, note)``; ``candidates`` may
+    be empty and ``note`` is a human-readable diagnostic string or ``None``.
+    Tessellation errors propagate to the caller.
     """
-    report = OptimizationReport()
-
-    if isinstance(part, cq.Assembly):
-        report.note = (
-            "skipped: assembly inputs (segmented prints) land in a follow-up commit"
-        )
-        _populate_optimize_stats(render_stats, report)
-        return part, report
-
-    if not opt_settings.orientation.enabled:
-        report.note = "orientation disabled in config"
-        _populate_optimize_stats(render_stats, report)
-        return part, report
-
-    try:
+    if mesh is None:
         mesh = _to_trimesh(part, name=name)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("optimize_part: tessellation failed (%r); skipping.", exc)
-        report.note = f"tessellation failed: {exc!r}"
-        return part, report
 
     candidates = find_best_orientations(
         mesh,
@@ -367,7 +353,6 @@ def optimize_part(
                 connector_tags.connector_mask,
                 bonus_weight=opt_settings.orientation.connector_bonus_weight,
             )
-        report.connector_tags = connector_tags
 
     # Bed-fit gate (SF2): drop candidates whose rotated AABB exceeds the
     # build volume. Annotates the survivors with ``rotated_extents_mm``.
@@ -435,10 +420,87 @@ def optimize_part(
             "supports will be needed regardless of orientation"
         )
 
-    if notes:
-        report.note = "; ".join(notes)
+    note = "; ".join(notes) if notes else None
+    return mesh, candidates, connector_tags, note
 
-    report.orientation_candidates = candidates
+
+def optimize_part(
+    part: _PartT,
+    opt_settings: PrintOptimizationSettings,
+    *,
+    name: str = "part",
+    path=None,
+    tube_settings=None,
+    output_bounds=None,
+    bed_clearance_mm: float = 2.0,
+    render_stats=None,
+    pinned_candidate: OrientationCandidate = None,
+    part_is_vented: bool = False,
+) -> Tuple[_PartT, OptimizationReport]:
+    """
+    Analyze a built part for SLA-print problems and (optionally) re-orient it.
+
+    Returns ``(maybe_rotated_part, report)``. The caller is responsible for
+    logging or otherwise consuming the report — this function does not print.
+
+    ``pinned_candidate`` skips the orientation search and applies that
+    candidate directly (used by the tube-gap placement pre-pass, which has
+    already searched on a near-identical mesh — re-searching could flip to a
+    different candidate and invalidate the derived gap position).
+
+    ``part_is_vented`` marks parts whose internal channels are already open
+    to the outside (tube_gap applied); drain-hole drilling is skipped for
+    them, since the ray-based trap test cannot see a non-line-of-sight
+    escape through the gap and would report open channels as trapped.
+
+    Assemblies and parts produced by the segmented-build flow are out of
+    scope for PR 1 and return a no-op report with a ``note``.
+    """
+    report = OptimizationReport()
+
+    if isinstance(part, cq.Assembly):
+        report.note = (
+            "skipped: assembly inputs (segmented prints) land in a follow-up commit"
+        )
+        _populate_optimize_stats(render_stats, report)
+        return part, report
+
+    if not opt_settings.orientation.enabled:
+        report.note = "orientation disabled in config"
+        _populate_optimize_stats(render_stats, report)
+        return part, report
+
+    try:
+        mesh = _to_trimesh(part, name=name)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("optimize_part: tessellation failed (%r); skipping.", exc)
+        report.note = f"tessellation failed: {exc!r}"
+        return part, report
+
+    if pinned_candidate is not None:
+        candidates = [pinned_candidate]
+        report.orientation_candidates = candidates
+        if render_stats is not None:
+            render_stats.add_stat(
+                "optimize.orientation.pinned",
+                True,
+                "Orientation pinned from the tube-gap placement pre-pass",
+            )
+    else:
+        mesh, candidates, connector_tags, note = select_orientation(
+            part,
+            opt_settings,
+            name=name,
+            path=path,
+            tube_settings=tube_settings,
+            output_bounds=output_bounds,
+            bed_clearance_mm=bed_clearance_mm,
+            mesh=mesh,
+        )
+        report.connector_tags = connector_tags
+        if note:
+            report.note = note
+        report.orientation_candidates = candidates
 
     if not candidates:
         report.note = (report.note or "") + " | Tweaker-3 returned no orientation candidates"
@@ -485,8 +547,41 @@ def optimize_part(
     #  - drain_holes.enabled in config
     #  - orientation actually applied (so build axis = world Z)
     #  - cavity analyzer succeeded with trapped cavities found
+    #  - part not already vented via tube_gap (the 26-ray trap test is
+    #    line-of-sight only, so open toroidal channels still read as
+    #    trapped and the drill would puncture an already-vented part)
+    #  - sweep path not a closed loop (booleans corrupt the coincident
+    #    seam caps of a closed sweep — same hazard apply_tube_gap refuses)
     drain_settings = getattr(opt_settings, "drain_holes", None)
-    if (
+    path_is_closed_loop = False
+    if path is not None:
+        try:
+            path_is_closed_loop = (
+                path.positionAt(0.0).sub(path.positionAt(1.0)).Length < 1e-3
+            )
+        except Exception:  # pragma: no cover - defensive
+            path_is_closed_loop = False
+    if drain_settings is not None and drain_settings.enabled and part_is_vented:
+        note = "drain holes skipped: part vented via tube_gap"
+        logger.info("[optimize] %s", note)
+        report.note = (report.note + "; " + note) if report.note else note
+        if render_stats is not None:
+            render_stats.add_stat(
+                "optimize.drain_holes.skipped", note, "Drain-hole drilling skipped"
+            )
+    elif drain_settings is not None and drain_settings.enabled and path_is_closed_loop:
+        note = (
+            "drain holes skipped: sweep path is a closed loop and a boolean "
+            "cut would corrupt its coincident seam — enable tube_gap to vent "
+            "the tube instead"
+        )
+        logger.warning("[optimize] %s", note)
+        report.note = (report.note + "; " + note) if report.note else note
+        if render_stats is not None:
+            render_stats.add_stat(
+                "optimize.drain_holes.skipped", note, "Drain-hole drilling skipped"
+            )
+    elif (
         drain_settings is not None
         and drain_settings.enabled
         and report.applied_candidate is not None

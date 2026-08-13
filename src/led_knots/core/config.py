@@ -198,12 +198,34 @@ class TubeGapSettings:
         data = data or {}
         self.enabled: bool = bool(data.get("enabled", False))
         self.gap_length_mm: float = float(data.get("gap_length_mm", 0.0))
-        # In [-0.5, 0.5]; 0.0 = centered along point polyline length.
+        # In [-0.5, 0.5]; 0.0 = centered along the path arc length.
         self.center_fraction: float = float(data.get("center_fraction", 0.0))
+        # "manual": use center_fraction as-is. "lowest_z": with auto-orient,
+        # derive the fraction that puts the gap at the oriented knot's lowest
+        # point so it acts as a resin drain/vent; center_fraction is then the
+        # provisional pass-1 value and the fallback when auto-orient is off.
+        self.placement: str = str(data.get("placement", "manual"))
+        # Cutter disc radius; None = auto (1.5 × tube outer_radius).
+        raw_radius = data.get("cutter_radius_mm")
+        self.cutter_radius_mm: Optional[float] = (
+            float(raw_radius) if raw_radius is not None else None
+        )
         if self.gap_length_mm < 0:
             raise ValueError("tube_gap.gap_length_mm must be >= 0 (got %s)" % self.gap_length_mm)
+        if self.enabled and self.gap_length_mm <= 0:
+            raise ValueError(
+                "tube_gap.enabled requires gap_length_mm > 0 (got %s)" % self.gap_length_mm
+            )
         if not (-0.5 <= self.center_fraction <= 0.5):
             raise ValueError("tube_gap.center_fraction must be in [-0.5, 0.5] (got %s)" % self.center_fraction)
+        if self.placement not in ("manual", "lowest_z"):
+            raise ValueError(
+                "tube_gap.placement must be 'manual' or 'lowest_z' (got %r)" % self.placement
+            )
+        if self.cutter_radius_mm is not None and self.cutter_radius_mm <= 0:
+            raise ValueError(
+                "tube_gap.cutter_radius_mm must be > 0 when set (got %s)" % self.cutter_radius_mm
+            )
 
 
 class ClampSettings:

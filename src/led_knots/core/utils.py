@@ -223,28 +223,8 @@ def build_tube_from_path(path, config, aux=None, face_kwargs: Optional[dict] = N
     )
 
 
-def draw_part(path, config, aux=None, **face_kwargs):
-    """
-    Create and render a part by sweeping a face profile along a path.
-
-    The face type is selected from config.tube_settings.face_type:
-    - "led_circle" (default): LED circle cross-section with oval cavity
-    - "solid_circle": Simple filled circle
-    - "square": Simple filled square
-
-    When print optimization or segmentation is enabled, builds accordingly then
-    writes a render bundle under rendering.output_dir (default renders/).
-
-    Args:
-        path: CadQuery Wire or Edge representing the sweep path
-        config: Config object with tube_settings, rendering, viewer settings
-        aux: Optional auxiliary path for sweep orientation
-        **face_kwargs: Additional keyword arguments to pass to the face creation function
-                       (e.g., rotation_z). orient_to_path is set automatically.
-
-    Returns:
-        The swept solid/compound/assembly result.
-    """
+def ensure_render_stats(config):
+    """Create and seed ``config.render_stats`` if it does not exist yet."""
     from .render_stats import RenderStats
 
     if config.render_stats is None:
@@ -261,6 +241,51 @@ def draw_part(path, config, aux=None, **face_kwargs):
             str(config.render_bundle_dir),
             "Render bundle output directory",
         )
+    return config.render_stats
+
+
+def resolve_bed_bounds(config):
+    """
+    Resolve the (bounds, clearance_mm) pair used for the orientation bed-fit
+    gate, shared by draw_part and the tube-gap placement pre-pass.
+    """
+    mp = config.max_print_bounds
+    if mp.enabled:
+        return mp, float(mp.clearance_mm)
+    # output_bounds sizing already reserves tube padding on every axis; do
+    # not subtract an extra bed margin here.
+    return config.output_bounds, 0.0
+
+
+def draw_part(path, config, aux=None, tube_gap_handled=False, pinned_orientation=None, **face_kwargs):
+    """
+    Create and render a part by sweeping a face profile along a path.
+
+    The face type is selected from config.tube_settings.face_type:
+    - "led_circle" (default): LED circle cross-section with oval cavity
+    - "solid_circle": Simple filled circle
+    - "square": Simple filled square
+
+    When print optimization or segmentation is enabled, builds accordingly then
+    writes a render bundle under rendering.output_dir (default renders/).
+
+    Args:
+        path: CadQuery Wire or Edge representing the sweep path
+        config: Config object with tube_settings, rendering, viewer settings
+        aux: Optional auxiliary path for sweep orientation
+        tube_gap_handled: True when the caller already applied config.tube_gap
+                          at the point level (open_loop_with_gap), so no
+                          boolean cut should run here.
+        pinned_orientation: OrientationCandidate to apply verbatim instead of
+                            re-running the orientation search (set by the
+                            tube-gap lowest_z placement pre-pass).
+        **face_kwargs: Additional keyword arguments to pass to the face creation function
+                       (e.g., rotation_z). orient_to_path is set automatically.
+
+    Returns:
+        The swept solid/compound/assembly result.
+    """
+    ensure_render_stats(config)
 
     face_kwargs_dict = face_kwargs or {}
 
@@ -268,6 +293,17 @@ def draw_part(path, config, aux=None, **face_kwargs):
         raise RuntimeError(
             "braided_rope fuse_method='mesh' is incompatible with print "
             "segmentation (max_print_bounds.enabled); use fuse_method='brep'."
+        )
+
+    tube_gap_enabled = (
+        getattr(config, "tube_gap", None) is not None
+        and config.tube_gap.enabled
+        and not tube_gap_handled
+    )
+    if tube_gap_enabled and _braid_mesh_fuse_selected(config):
+        raise RuntimeError(
+            "tube_gap requires B-rep geometry for the boolean cut; "
+            "braided_rope fuse_method='mesh' produces a mesh. Use fuse_method='brep'."
         )
 
     with config.render_stats.record_stage("draw_part.sweep"):
@@ -278,6 +314,7 @@ def draw_part(path, config, aux=None, **face_kwargs):
                 build_tube_from_path,
                 aux=aux,
                 face_kwargs=face_kwargs_dict,
+                tube_gap_handled=tube_gap_handled,
             )
         else:
             result = build_tube_from_path(path, config, aux=aux, face_kwargs=face_kwargs_dict)
@@ -296,6 +333,22 @@ def draw_part(path, config, aux=None, **face_kwargs):
 
         result = fuse_part_solids(result, name=config.name or "part")
 
+    # Segmented assemblies are cut per-segment inside
+    # build_segmented_tube_assembly (segments are still in path coordinates
+    # there); here we only cut single-piece outputs.
+    if tube_gap_enabled and not isinstance(result, (cq.Assembly, trimesh.Trimesh)):
+        from .tube_gap import apply_tube_gap
+
+        with config.render_stats.record_stage("draw_part.tube_gap"):
+            result = apply_tube_gap(result, path, config)
+
+    # A gap (applied here or at the point level by the caller) opens the
+    # tube's internal channels to the outside — the drain-hole stage must
+    # know, because its trap test cannot see the escape route.
+    part_is_vented = tube_gap_handled or (
+        tube_gap_enabled and not isinstance(result, (cq.Assembly, trimesh.Trimesh))
+    )
+
     if config.print_optimization.enabled:
         # Segmented assemblies are SLA-rescored inside
         # build_segmented_tube_assembly itself (per-segment), so here we
@@ -313,15 +366,7 @@ def draw_part(path, config, aux=None, **face_kwargs):
                 "Running print optimization on %s...",
                 config.name or "part",
             )
-            mp = config.max_print_bounds
-            if mp.enabled:
-                bed_bounds = mp
-                bed_clearance = float(mp.clearance_mm)
-            else:
-                # output_bounds sizing already reserves tube padding on every
-                # axis; do not subtract an extra bed margin here.
-                bed_bounds = config.output_bounds
-                bed_clearance = 0.0
+            bed_bounds, bed_clearance = resolve_bed_bounds(config)
             with config.render_stats.record_stage("draw_part.optimize"):
                 result, report = optimize_part(
                     result,
@@ -332,6 +377,8 @@ def draw_part(path, config, aux=None, **face_kwargs):
                     output_bounds=bed_bounds,
                     bed_clearance_mm=bed_clearance,
                     render_stats=config.render_stats,
+                    pinned_candidate=pinned_orientation,
+                    part_is_vented=part_is_vented,
                 )
             print(format_console(report, part_name=config.name or "part"))
             logger.info(

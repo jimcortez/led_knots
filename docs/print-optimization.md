@@ -129,6 +129,13 @@ Config keys, validated in [settings.py:39](../src/led_knots/optimize/settings.py
 
 If `drain_holes.enabled` is set but `--auto-orient` is not passed, the stage logs `[optimize] drain_holes enabled but skipped — requires --auto-orient` and does nothing.
 
+Two more guards skip drilling entirely:
+
+- **Vented parts.** When a `tube_gap` was applied (point-level or boolean), the part's internal channels are already open to the outside — but the cavity analyzer's 26-ray trap test is line-of-sight only, so those open toroidal channels still report as trapped. Drilling would puncture an already-vented part, so the stage skips with `drain holes skipped: part vented via tube_gap`.
+- **Closed sweep paths.** A closed knot sweep has coincident seam caps that OCC booleans corrupt; drilling is skipped with a note recommending `tube_gap` instead.
+
+> **Limitation.** The drill targets each trapped cavity's `(x, y)` *centroid* with a full-height cylinder. For curved channels (any knot), the centroid frequently lies outside the cavity — or outside the part — so the hole can miss the pocket while still piercing every strand in that XY column. For knot tubes the supported anti-suction mechanism is `tube_gap.placement: lowest_z` (see [configuration.md](configuration.md#tube_gap)), which places the wiring gap at the bottom of the auto-oriented print so all internal channels drain through it. Keep drain holes for genuinely sealed, convex-ish parts whose cavity report looks correct.
+
 > **Warning.** Drilling is geometric, not semantic. The drill goes through whatever sits at the cavity centroid's `(x, y)` along Z — including embedded clamp slots, joint pins, or the LED tube channel itself if the cavity centroid happens to share an XY column with them. **Always** run `--optimize` first and inspect the cavity entries in the console report (and the PNG diagnostics) before flipping `enabled: true`. The `min_cavity_volume_mm3` floor is your primary defence against drilling micro-cavities that are actually tessellation noise.
 
 ## Reports

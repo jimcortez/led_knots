@@ -2,9 +2,10 @@ knot_type: trefoil
 print_optimization:
   enabled: true
   drain_holes:
-    # Auto-drill drain (bottom) + vent (top) holes through trapped resin
-    # cavities detected by the analyzer. Requires --auto-orient AND the
-    # cavity detector to be available (manifold3d installed). Disabled by
-    # default — opt in only after the analyzer's cavity report on your
-    # part looks correct.
-    enabled: true
+    enabled: false  # channels vent through the bottom gap (tube_gap placement: lowest_z)
+  orientation:
+    auto_apply: true
+tube_gap:
+  enabled: true
+  center_fraction: 0.15
+  placement: lowest_z
