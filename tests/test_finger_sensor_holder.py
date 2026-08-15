@@ -43,7 +43,7 @@ def test_params_from_config_overlay(tmp_path, argv_guard) -> None:
     cfg = Config(args=parse_render_args())
     params = FingerSensorHolderParams.from_config(cfg)
     assert params.holder_width == 30.00
-    assert params.sensor_pocket_diameter == 17.20
+    assert params.sensor_pocket_diameter == 16.30
 
 
 def test_side_walls_align_with_base_edges() -> None:

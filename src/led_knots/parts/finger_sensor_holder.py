@@ -319,16 +319,20 @@ def _finger_trough_cutter(p: FingerSensorHolderParams) -> cq.Solid:
     return fuse(tool, stop)
 
 
-def _sensor_pocket_cutter(p: FingerSensorHolderParams) -> cq.Solid:
-    cx = p.lateral_center_x
-    cy = p.sensor_center_y
-    floor_z = (
+def _sensor_pocket_floor_z(p: FingerSensorHolderParams) -> float:
+    return (
         p.base_thickness
         + p.pedestal_front_height
         - p.finger_trough_depth
         - p.sensor_pocket_depth
         + p.sensor_face_raise_mm
     )
+
+
+def _sensor_pocket_cutter(p: FingerSensorHolderParams) -> cq.Solid:
+    cx = p.lateral_center_x
+    cy = p.sensor_center_y
+    floor_z = _sensor_pocket_floor_z(p)
     pocket_r = 0.5 * p.sensor_pocket_diameter
     pl = Plane(origin=(cx, cy, floor_z), normal=(0, 0, 1), xDir=(1, 0, 0))
     pocket = extrude(face(wire(circle(pocket_r).moved(Location(pl)))), (0, 0, p.sensor_pocket_depth + 2.0))
@@ -342,21 +346,31 @@ def _sensor_pocket_cutter(p: FingerSensorHolderParams) -> cq.Solid:
 
 def _cable_channel_cutter(p: FingerSensorHolderParams) -> cq.Solid:
     cx = p.lateral_center_x
-    y_start = p.sensor_center_y + 0.5 * p.sensor_pcb_diameter
+    pocket_r = 0.5 * p.sensor_pocket_diameter
+    half_w = 0.5 * p.cable_channel_width
+    if half_w >= pocket_r:
+        raise ValueError("cable_channel_width must be narrower than the sensor pocket diameter.")
+    # Start at the chord where the channel sides meet the pocket wall so the
+    # PCB underside relief spans the entire pocket diameter (wires and solder
+    # joints on the sensor back), not just the span behind the PCB rear edge.
+    y_start = p.sensor_center_y - math.sqrt(pocket_r * pocket_r - half_w * half_w)
     y_end = p.cable_exit_y
     z_floor = p.base_thickness - p.cable_channel_depth
     length = max(y_end - y_start, 1.0)
+    # Tall enough to open through the pocket floor along the pocket span;
+    # behind the pedestal the extra height only cuts air above the base top.
+    channel_top = _sensor_pocket_floor_z(p) + 0.5
     channel = _corner_box(
-        cx - 0.5 * p.cable_channel_width,
+        cx - half_w,
         y_start,
         z_floor,
         p.cable_channel_width,
         length,
-        p.cable_channel_depth + 0.5,
+        channel_top - z_floor,
     )
     strain_r = 0.5 * p.strain_relief_pocket_diameter
     pl = Plane(
-        origin=(cx, y_start + 2.0, p.base_thickness),
+        origin=(cx, p.sensor_center_y + 0.5 * p.sensor_pcb_diameter + 2.0, p.base_thickness),
         normal=(0, 0, 1),
         xDir=(1, 0, 0),
     )

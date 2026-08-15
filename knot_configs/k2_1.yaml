@@ -1,1 +1,11 @@
 knot_type: k2_1
+print_optimization:
+  enabled: true
+  drain_holes:
+    enabled: false  # channels vent through the bottom gap (tube_gap placement: lowest_z)
+  orientation:
+    auto_apply: true
+tube_gap:
+  enabled: true
+  #center_fraction: 0.15
+  placement: lowest_z

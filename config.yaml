@@ -219,7 +219,7 @@ finger_sensor_holder:
   pedestal_front_height: 10.00       # mm above base top
   sensor_pcb_diameter: 15.80        # mm
   sensor_max_thickness: 3.60         # mm
-  sensor_pocket_diameter: 17.20      # mm (recommended; editable)
+  sensor_pocket_diameter: 16.30      # mm (recommended; editable)
   sensor_pocket_depth: 3.70          # mm (recommended; editable)
   sensor_exposed_opening_diameter: 15.00  # mm (recommended; editable)
   cable_channel_width: 4.50         # mm (recommended; editable)
